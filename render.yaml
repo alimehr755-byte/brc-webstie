@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: bonsai-rehab-center
+    runtime: docker
+    plan: standard
+    autoDeploy: true
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PERSIST_DIR
+        value: /data
+      - key: GAIT_PYTHON
+        value: /opt/venv/bin/python
+      - key: GAIT_ANALYZER_TIMEOUT
+        value: "2700000"
+      - key: CORS_ORIGINS
+        value: "https://localhost,capacitor://localhost,https://capacitor.local"
+      - key: CORS_ALLOW_ANY
+        value: "false"
+    disk:
+      name: brc-data
+      mountPath: /data
+      sizeGB: 2

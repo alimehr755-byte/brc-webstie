@@ -1,0 +1,12 @@
+{
+  "appId": "com.bonsai.rehabcenter",
+  "appName": "Bonsai Rehab Center",
+  "webDir": "../public",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

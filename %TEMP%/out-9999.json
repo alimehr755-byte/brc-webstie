@@ -1,0 +1,186 @@
+{
+  "analyzer": "brc-gait-lab",
+  "version": "1.0.0",
+  "mode": "rejected",
+  "generated_at": "2026-09-08T13:26:25.422852+00:00",
+  "session_id": "9999",
+  "patient": "Test Patient",
+  "diagnostic_note": "Analysis blocked (2e.txt). The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis. Details: sagittal: Motion energy is spread outside a human walking cadence (likely jumping, fidgeting, or scenery). frontal: Motion energy is spread outside a human walking cadence (likely jumping, fidgeting, or scenery).",
+  "disclaimer": "This automated gait interpretation is a screening aid produced by the BRC Gait Lab. It is not a diagnosis and does not replace an in-person gait laboratory assessment by a qualified clinician. Findings must be confirmed during clinical examination.",
+  "gait_validation": {
+    "status": "rejected",
+    "message": "The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis.",
+    "reasons": [
+      "sagittal: Motion energy is spread outside a human walking cadence (likely jumping, fidgeting, or scenery).",
+      "frontal: Motion energy is spread outside a human walking cadence (likely jumping, fidgeting, or scenery)."
+    ]
+  },
+  "cycle": {
+    "cadence_cycles_per_second": null,
+    "cycle_seconds": null,
+    "stance_pct": null,
+    "swing_pct": null,
+    "stance_norm_band": [
+      58.0,
+      62.0
+    ],
+    "phases": [],
+    "anomalies": []
+  },
+  "profile": {
+    "frontal": {
+      "deformities": [],
+      "assessed": false,
+      "note": "The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis.",
+      "stance_notes": []
+    },
+    "sagittal": {
+      "deformities": [],
+      "assessed": false,
+      "note": "The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis.",
+      "stance_notes": []
+    },
+    "rotational": {
+      "deformities": [],
+      "assessed": false,
+      "note": "Not assessed — analysis blocked by the gait-validity gate.",
+      "stance_notes": []
+    }
+  },
+  "kinematics": {
+    "rom": [],
+    "summary": [
+      "Analysis blocked: The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis."
+    ]
+  },
+  "muscles": {
+    "overactive": [],
+    "weak": [],
+    "notes": [
+      "No measurements were produced — the recording failed the walking (gait) validity gate."
+    ]
+  },
+  "prescriptions": {
+    "exercises": [],
+    "orthotics": [],
+    "prosthetics": [],
+    "guidance": [
+      "All prescriptions require a valid walking-capture analysis."
+    ]
+  },
+  "prediction": {},
+  "references": [
+    {
+      "id": "R1",
+      "authors": "Perry J, Burnfield JM",
+      "year": 2010,
+      "title": "Gait Analysis: Normal and Pathological Function",
+      "venue": "SLACK Incorporated, 2nd ed."
+    },
+    {
+      "id": "R2",
+      "authors": "Winter DA",
+      "year": 1991,
+      "title": "Biomechanics and Motor Control of Human Gait: Normal, Elderly and Pathological",
+      "venue": "University of Waterloo Press, 2nd ed."
+    },
+    {
+      "id": "R3",
+      "authors": "Sutherland DH",
+      "year": 1997,
+      "title": "The development of mature gait",
+      "venue": "Gait & Posture, 6(2):163-170"
+    },
+    {
+      "id": "R4",
+      "authors": "Whittle MW",
+      "year": 2007,
+      "title": "Gait Analysis: An Introduction",
+      "venue": "Butterworth-Heinemann, 4th ed."
+    },
+    {
+      "id": "R5",
+      "authors": "Baker R",
+      "year": 2013,
+      "title": "Measuring Walking: A Handbook of Clinical Gait Analysis",
+      "venue": "Mac Keith Press"
+    },
+    {
+      "id": "R6",
+      "authors": "Novacheck TF",
+      "year": 1998,
+      "title": "The biomechanics of running",
+      "venue": "Gait & Posture, 7(1):77-95"
+    },
+    {
+      "id": "R7",
+      "authors": "Benedetti MG, Catani F, Leardini A, Pignotti E, Giannini S",
+      "year": 1998,
+      "title": "Data management in gait analysis for clinical applications",
+      "venue": "Clinical Biomechanics, 13(3):204-215"
+    },
+    {
+      "id": "R8",
+      "authors": "Gage JR, Schwartz MH, Koop SE, Novacheck TF",
+      "year": 2009,
+      "title": "The Identification and Treatment of Gait Problems in Cerebral Palsy",
+      "venue": "Mac Keith Press, 2nd ed."
+    }
+  ],
+  "reference_sections": {},
+  "cv": {
+    "sagittal": {
+      "plane": "sagittal",
+      "status": "rejected",
+      "error": "The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis.",
+      "gait_validation": {
+        "status": "rejected",
+        "reason": "no_walking_cadence",
+        "explanation": "Motion energy is spread outside a human walking cadence (likely jumping, fidgeting, or scenery).",
+        "message": "The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis.",
+        "evidence": {
+          "sampled_frames": 75,
+          "tracked_frames": 75,
+          "upright_frames": 75,
+          "fps_effective": 7.49
+        }
+      }
+    },
+    "frontal": {
+      "plane": "frontal",
+      "status": "rejected",
+      "error": "The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis.",
+      "gait_validation": {
+        "status": "rejected",
+        "reason": "no_walking_cadence",
+        "explanation": "Motion energy is spread outside a human walking cadence (likely jumping, fidgeting, or scenery).",
+        "message": "The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis.",
+        "evidence": {
+          "sampled_frames": 75,
+          "tracked_frames": 75,
+          "upright_frames": 75,
+          "fps_effective": 7.49
+        }
+      }
+    },
+    "artifacts_abs": ""
+  },
+  "input": {
+    "frontal_video": "session-3-frontal-1787997706062.mp4",
+    "sagittal_video": "session-3-sagittal-1787997706035.mp4",
+    "combined_video": null,
+    "derived_from_combined": false,
+    "routing": "single-plane",
+    "mode-note": "blocked"
+  },
+  "cv_split": {
+    "mode": null,
+    "reason": null,
+    "planes": null
+  },
+  "cv3d": {
+    "status": "not_run",
+    "mode": "single-plane",
+    "anatomical_note": "Multi-view 3D pipeline was not run — the gait-validity gate blocked the recording."
+  }
+}

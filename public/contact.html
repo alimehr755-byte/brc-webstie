@@ -1,0 +1,137 @@
+?<!DOCTYPE html>
+<html lang="en">
+<head>
+	<script src="/js/mobile.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Contact Us | Bonsai Rehabilitation Center</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="/index.html" class="brand">
+      <img src="/images/logo.png" alt="Bonsai Rehabilitation Center" class="brand-logo">
+    </a>
+    <button class="nav-toggle" aria-label="Toggle menu">&#9776;</button>
+    <ul class="nav-links">
+      <li><a href="/index.html">Home</a></li>
+      <li><a href="/about.html">About Us</a></li>
+      <li><a href="/services.html">Services</a></li>
+      <li><a href="/contact.html" class="active">Contact</a></li>
+      <li><a href="/assessment.html">Online Assessment</a></li>
+      <li><a href="/gait.html">Gait Lab</a></li>
+      <li><a href="/blog.html">Blog</a></li>
+      <li><a href="/research.html">Research</a></li>
+      <li id="nav-auth-slot" style="display:flex; gap:20px; align-items:center;">
+        <a href="/login.html">Log in</a>
+        <a href="/signup.html" class="nav-cta">Book an Appointment</a>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<div class="page-hero container">
+  <span class="section-eyebrow">Get in Touch</span>
+  <h1>We'd love to hear from you</h1>
+  <p>Questions about a service, a program, or where to start? Send us a message and we'll get back to you.</p>
+</div>
+
+<section>
+  <div class="container grid grid-2">
+    <div class="card card-lg">
+      <h3 class="mb-24">Send a Message</h3>
+      <div id="contact-msg" class="form-msg"></div>
+      <form id="contact-form">
+        <div class="field">
+          <label for="name">Your Name *</label>
+          <input type="text" id="name" name="name" required>
+        </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email">
+        </div>
+        <div class="field">
+          <label for="phone">Phone Number</label>
+          <input type="tel" id="phone" name="phone">
+        </div>
+        <div class="field">
+          <label for="message">Message *</label>
+          <textarea id="message" name="message" required placeholder="Tell us a bit about what you're looking for..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="contact-submit">Send Message</button>
+      </form>
+    </div>
+
+    <div>
+      <h3 class="mb-24">Visit or Reach Us</h3>
+      <div class="card mb-24">
+        <div class="icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-6.4-7-11a7 7 0 0 1 14 0c0 4.6-7 11-7 11z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="2"/></svg></div>
+        <h3>Location</h3>
+        <p>Shadman Colony, Abdara Road,<br>University Town, Peshawar, Pakistan</p>
+      </div>
+      <div class="card mb-24">
+        <div class="icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0z" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+        <h3>Hours</h3>
+        <p>Monday – Friday, 9:00 AM – 5:00 PM</p>
+      </div>
+      <div class="card">
+        <div class="icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 4h16v16H4z" stroke="currentColor" stroke-width="2"/><path d="M4 6l8 7 8-7" stroke="currentColor" stroke-width="2"/></svg></div>
+        <h3>Contact</h3>
+        <p>bonsai.rehabilitaion@gmail.com<br>0313 9327164</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="container mt-24">
+    <div class="map-card">
+<iframe
+        title="Bonsai Rehabilitation Center location on Google Maps"
+        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d26461.4521065904!2d71.46531343460086!3d34.00071345393644!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x38d91765584948d1%3A0x22679b2d0f6018e9!2sBonsai%20Rehabilitation%20Center!5e0!3m2!1sen!2s!4v1789020610342!5m2!1sen!2s"
+        loading="lazy"
+        referrerpolicy="strict-origin-when-cross-origin">
+      </iframe>
+    </div>
+    <p class="text-center mt-24">
+      <a href="https://www.google.com/maps/search/?api=1&query=Bonsai+Rehabilitation+Center%2C+Abdara+Road%2C+University+Town%2C+Peshawar" target="_blank" rel="noopener" class="btn btn-outline">Open in Google Maps →</a>
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <div class="footer-brand">Bonsai Rehabilitation Center</div>
+        <p>Pediatric occupational, physical, speech, and behavior therapy in Peshawar, KPK.</p>
+      </div>
+      <div>
+        <h4>Quick Links</h4>
+        <ul>
+          <li><a href="/about.html">About Us</a></li>
+          <li><a href="/services.html">Services</a></li>
+          <li><a href="/contact.html">Contact</a></li>
+          <li><a href="/signup.html">Book an Appointment</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li>Shadman Colony, Abdara Road,<br>University Town, Peshawar</li>
+          <li>bonsai.rehabilitaion@gmail.com</li>
+          <li>0313 9327164</li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 Bonsai Rehabilitation Center. All rights reserved.</span>
+      <span>Growing every child's potential, together.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/js/main.js"></script>
+<script src="/js/contact.js"></script>
+</body>
+</html>

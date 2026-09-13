@@ -1,0 +1,132 @@
+?<!DOCTYPE html>
+<html lang="en">
+<head>
+	<script src="/js/mobile.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>My Dashboard | Bonsai Rehabilitation Center</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="/index.html" class="brand">
+      <img src="/images/logo.png" alt="Bonsai Rehabilitation Center" class="brand-logo">
+    </a>
+    <button class="nav-toggle" aria-label="Toggle menu">&#9776;</button>
+    <ul class="nav-links">
+      <li><a href="/index.html">Home</a></li>
+      <li><a href="/about.html">About Us</a></li>
+      <li><a href="/services.html">Services</a></li>
+      <li><a href="/contact.html">Contact</a></li>
+      <li><a href="/assessment.html">Online Assessment</a></li>
+      <li><a href="/gait.html">Gait Lab</a></li>
+      <li><a href="/blog.html">Blog</a></li>
+      <li><a href="/research.html">Research</a></li>
+      <li id="nav-auth-slot" style="display:flex; gap:20px; align-items:center;">
+        <a href="/login.html">Log in</a>
+        <a href="/signup.html" class="nav-cta">Book an Appointment</a>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<header class="dash-header">
+  <div class="container">
+    <div>
+      <h1 id="dash-welcome">Welcome back</h1>
+      <p id="dash-subtitle">Here's what's happening with your child's care.</p>
+    </div>
+  </div>
+</header>
+
+<div class="dash-body container">
+  <div class="dash-grid">
+    <div class="dash-card">
+      <h3>👤 Profile</h3>
+<p id="profile-summary">Loading...</p>
+      <span class="btn btn-ghost" style="font-size:0.82rem; padding:8px 14px;" id="edit-profile-note">Contact us to update details</span>
+      <a href="/change-password.html" class="btn btn-outline" style="font-size:0.82rem; padding:8px 14px; margin-top:8px; display:inline-block;">🔑 Change Password</a>
+    </div>
+    <div class="dash-card">
+      <h3>🧩 Online Assessment</h3>
+      <p id="assessment-status-text">Complete your child's intake assessment online before your first visit.</p>
+      <a href="/assessment.html" class="btn btn-outline" style="font-size:0.85rem;" id="assessment-btn">Start Assessment</a>
+    </div>
+    <div class="dash-card">
+      <h3>🚶 Gait Analysis Report</h3>
+      <p id="gait-status-text">Upload frontal and side-on walk videos for an automated gait-cycle, deformity, and prescription analysis.</p>
+      <a href="/gait.html" class="btn btn-primary" style="font-size:0.85rem;" id="gait-btn">Open Gait Lab</a>
+    </div>
+  </div>
+
+  <div class="grid grid-2" style="align-items:flex-start;">
+    <div class="dash-card">
+      <h3 class="mb-24">📅 Book an Appointment</h3>
+      <div id="booking-msg" class="form-msg"></div>
+      <form id="booking-form">
+        <div class="field">
+          <label>Therapy Type(s) — select one or more *</label>
+          <div class="checkbox-grid">
+            <label class="check-option"><input type="checkbox" name="therapyTypes" value="occupational_therapy"> Occupational Therapy</label>
+            <label class="check-option"><input type="checkbox" name="therapyTypes" value="speech_therapy"> Speech Therapy</label>
+            <label class="check-option"><input type="checkbox" name="therapyTypes" value="physical_therapy"> Physical Therapy</label>
+            <label class="check-option"><input type="checkbox" name="therapyTypes" value="behavior_therapy"> Behavior Therapy</label>
+            <label class="check-option"><input type="checkbox" name="therapyTypes" value="audio_verbal_therapy"> Audio-Verbal Therapy</label>
+            <label class="check-option"><input type="checkbox" name="therapyTypes" value="prosthetic_orthotic"> Prosthetic / Orthotic</label>
+            <label class="check-option"><input type="checkbox" name="therapyTypes" value="montessori"> Montessori Program</label>
+            <label class="check-option"><input type="checkbox" name="therapyTypes" value="school_readiness"> School Readiness Program</label>
+            <label class="check-option" style="grid-column: 1 / -1;"><input type="checkbox" name="therapyTypes" value="other" id="other-checkbox"> Other</label>
+          </div>
+        </div>
+
+        <div class="field" id="other-desc-field" style="display:none;">
+          <label for="otherDescription">Please describe</label>
+          <input type="text" id="otherDescription" name="otherDescription" placeholder="Tell us what you're looking for">
+        </div>
+
+        <div class="field">
+          <label>Session Mode *</label>
+          <div class="radio-pill-group">
+            <label class="radio-pill"><input type="radio" name="mode" value="in_clinic" checked> In-Clinic</label>
+            <label class="radio-pill"><input type="radio" name="mode" value="online"> Online Therapy</label>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="preferredDate">Preferred Date</label>
+          <input type="date" id="preferredDate" name="preferredDate">
+        </div>
+
+        <div class="field">
+          <label for="notes">Additional Notes</label>
+          <textarea id="notes" name="notes" placeholder="Anything else we should know?"></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="booking-submit">Submit Appointment Request</button>
+      </form>
+    </div>
+
+    <div class="dash-card">
+      <h3 class="mb-24">Your Appointments</h3>
+      <div id="appointments-list" class="appt-list">
+        <p class="empty-state">Loading appointments...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div class="container">
+    <div class="footer-bottom">
+      <span>© 2026 Bonsai Rehabilitation Center. All rights reserved.</span>
+      <span>Growing every child's potential, together.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/js/main.js"></script>
+<script src="/js/dashboard.js"></script>
+</body>
+</html>

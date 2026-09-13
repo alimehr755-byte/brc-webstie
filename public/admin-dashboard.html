@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<script src="/js/mobile.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Staff Dashboard | Bonsai Rehabilitation Center</title>
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="admin-layout">
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+  <aside class="admin-sidebar">
+    <div class="brand">
+      Bonsai Staff
+    </div>
+    <nav class="admin-nav">
+      <a href="#overview" class="admin-nav-link active" data-target="overview">📊 Overview</a>
+      <a href="#patients" class="admin-nav-link" data-target="patients">👨‍👩‍👧 Patients</a>
+      <a href="#appointments" class="admin-nav-link" data-target="appointments">📅 Appointments</a>
+      <a href="#assessments" class="admin-nav-link" data-target="assessments">🧩 Assessments</a>
+      <a href="#reports" class="admin-nav-link" data-target="reports">📄 Reports</a>
+      <a href="#users" class="admin-nav-link" data-target="users">👥 Users</a>
+      <a href="#audit" class="admin-nav-link" data-target="audit">📋 Audit Logs</a>
+      <a href="#messages" class="admin-nav-link" data-target="messages">✉️ Messages</a>
+      <span class="nav-section-label" id="nav-label-content">Content</span>
+      <a href="#blog" class="admin-nav-link" data-target="blog">📝 Blog</a>
+      <a href="#research" class="admin-nav-link" data-target="research">📚 Research</a>
+      <a href="#gait" class="admin-nav-link" data-target="gait">🚶 Gait Lab</a>
+      <span class="nav-section-label" id="nav-label-account">Account</span>
+      <a href="#settings" class="admin-nav-link" data-target="settings">⚙️ Settings</a>
+      <a href="/change-password.html">🔑 Change Password</a>
+      <button id="admin-logout-btn">↩ Log out</button>
+      <a href="/index.html">🌐 View Public Site</a>
+    </nav>
+  </aside>
+
+  <main class="admin-main">
+    <div class="admin-topbar">
+      <div style="display:flex; align-items:center; gap:14px;">
+        <button class="admin-menu-toggle" id="admin-menu-toggle" aria-label="Open navigation menu" aria-expanded="false">☰ Menu</button>
+        <div>
+          <h1 id="admin-welcome">Staff Dashboard</h1>
+          <p>Overview of patients, appointments, and inquiries.</p>
+        </div>
+      </div>
+      <div class="admin-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input type="text" id="admin-search-input" placeholder="Search current table...">
+      </div>
+      <div class="admin-bell" id="admin-bell">
+        <button id="bell-toggle" aria-label="Notifications" aria-expanded="false">🔔</button>
+        <span class="bell-badge" id="bell-badge" style="display:none;">0</span>
+        <div class="bell-panel" id="bell-panel" style="display:none;">
+          <div class="bell-panel-head">
+            <h4>Notifications</h4>
+            <button id="bell-read-all" class="btn btn-ghost btn-sm">Mark all read</button>
+          </div>
+          <div class="bell-list" id="bell-list"><div class="bell-empty">No notifications yet.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- OVERVIEW SECTION -->
+    <section id="section-overview">
+      <div class="date-filter-bar">
+        <label>From <input type="date" id="overview-from"></label>
+        <label>To <input type="date" id="overview-to"></label>
+        <button class="btn btn-ghost" id="overview-filter-apply" style="font-size:0.85rem; padding:9px 16px;">Apply</button>
+        <button class="btn btn-ghost" id="overview-filter-clear" style="font-size:0.85rem; padding:9px 16px;">Clear</button>
+        <span style="flex:1;"></span>
+        <a class="btn btn-outline" id="download-overview-pdf" style="font-size:0.85rem; padding:9px 16px;">⬇ Overview PDF</a>
+        <a class="btn btn-outline" id="download-xlsx" style="font-size:0.85rem; padding:9px 16px;">⬇ Full Data (XLSX)</a>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Total Patients</div>
+          <div class="kpi-value" id="kpi-patients">—</div>
+          <div class="kpi-sub">Registered families</div>
+        </div>
+        <div class="kpi-card accent-coral">
+          <div class="kpi-label">Pending Appointments</div>
+          <div class="kpi-value" id="kpi-pending">—</div>
+          <div class="kpi-sub">Awaiting confirmation</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Confirmed Appointments</div>
+          <div class="kpi-value" id="kpi-confirmed">—</div>
+          <div class="kpi-sub">Upcoming sessions</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">New Contact Messages</div>
+          <div class="kpi-value" id="kpi-messages">—</div>
+          <div class="kpi-sub">From the website</div>
+        </div>
+        <div class="kpi-card accent-coral">
+          <div class="kpi-label">Assessments Pending Review</div>
+          <div class="kpi-value" id="kpi-assess-pending">—</div>
+          <div class="kpi-sub" id="kpi-assess-total">—</div>
+        </div>
+      </div>
+
+      <div class="chart-card mb-24">
+        <div class="chart-head"><h3>Appointments Over Time (last 6 months)</h3><button class="png-btn" data-chart="trendChart" data-name="appointments-trend">⬇ PNG</button></div>
+        <canvas id="trendChart" style="max-height:220px;"></canvas>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="chart-head"><h3>Appointments by Therapy Type</h3><button class="png-btn" data-chart="therapyChart" data-name="therapy-breakdown">⬇ PNG</button></div>
+          <canvas id="therapyChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>Appointment Status Breakdown</h3><button class="png-btn" data-chart="statusChart" data-name="status-breakdown">⬇ PNG</button></div>
+          <canvas id="statusChart"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="chart-head"><h3>In-Clinic vs Online</h3><button class="png-btn" data-chart="modeChart" data-name="mode-breakdown">⬇ PNG</button></div>
+          <canvas id="modeChart" style="max-height:180px;"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>Patients by Diagnosis Category</h3><button class="png-btn" data-chart="diagnosisChart" data-name="diagnosis-breakdown">⬇ PNG</button></div>
+          <canvas id="diagnosisChart" style="max-height:180px;"></canvas>
+        </div>
+      </div>
+
+      <div class="admin-table-card">
+        <div class="table-head"><h3>Recently Registered Patients</h3></div>
+        <table class="admin-table">
+          <thead><tr><th>Guardian</th><th>Child</th><th>Phone</th><th>Joined</th></tr></thead>
+          <tbody id="recent-patients-body"><tr><td colspan="4">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- PATIENTS SECTION -->
+    <section id="section-patients" style="display:none;">
+      <div class="table-head mb-24">
+        <div class="filter-pills" id="patient-category-pills"></div>
+      </div>
+      <div class="admin-table-card">
+        <div class="table-head"><h3>All Patients</h3></div>
+        <table class="admin-table">
+          <thead><tr><th>Guardian</th><th>Child</th><th>Diagnosis</th><th>Category</th><th>Phone</th><th>Appointments</th><th></th></tr></thead>
+          <tbody id="patients-body"><tr><td colspan="7">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- APPOINTMENTS SECTION -->
+    <section id="section-appointments" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head">
+          <h3>All Appointments</h3>
+          <div class="filter-pills" id="appt-filter-pills">
+            <button class="filter-pill active" data-status="all">All</button>
+            <button class="filter-pill" data-status="pending">Pending</button>
+            <button class="filter-pill" data-status="confirmed">Confirmed</button>
+            <button class="filter-pill" data-status="completed">Completed</button>
+            <button class="filter-pill" data-status="cancelled">Cancelled</button>
+          </div>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Patient</th><th>Therapy</th><th>Mode</th><th>Preferred Date</th><th>Requested</th><th>Status</th></tr></thead>
+          <tbody id="appointments-body"><tr><td colspan="6">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ASSESSMENTS SECTION -->
+    <section id="section-assessments" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head">
+          <h3>Online Assessments</h3>
+          <div class="filter-pills" id="assess-filter-pills">
+            <button class="filter-pill active" data-status="all">All</button>
+            <button class="filter-pill" data-status="pending_review">Pending Review</button>
+            <button class="filter-pill" data-status="reviewed">Reviewed</button>
+          </div>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Guardian</th><th>Child</th><th>Flagged Areas</th><th>Submitted</th><th>Status</th><th></th></tr></thead>
+          <tbody id="assessments-body"><tr><td colspan="6">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- REPORTS SECTION -->
+    <section id="section-reports" style="display:none;">
+      <div class="admin-table-card" style="padding:28px;">
+        <h3 class="mb-24">Export & Reports</h3>
+        <div class="date-filter-bar mb-24">
+          <label>From <input type="date" id="reports-from"></label>
+          <label>To <input type="date" id="reports-to"></label>
+          <span class="field-hint">Applies to appointments &amp; assessments in the exports below (patients are always included in full).</span>
+        </div>
+        <div class="grid grid-3">
+          <div class="card">
+            <h3>Full Data Export</h3>
+            <p>Patients, appointments, and assessments in one spreadsheet — three sheets, ready to filter/sort in Excel.</p>
+            <a class="btn btn-primary btn-block" id="reports-download-xlsx" style="margin-top:14px;">⬇ Download XLSX</a>
+          </div>
+          <div class="card">
+            <h3>Clinic Overview Report</h3>
+            <p>KPIs, a therapy-type bar chart, status breakdown, and diagnosis-category breakdown as a printable PDF.</p>
+            <a class="btn btn-primary btn-block" id="reports-download-pdf" style="margin-top:14px;">⬇ Download PDF</a>
+          </div>
+          <div class="card">
+            <h3>All Users Directory</h3>
+            <p>Every active account — patients, clinicians, and administrators — as a formatted Word directory with the clinic letterhead and a demographic table.</p>
+            <a class="btn btn-secondary btn-block" id="reports-download-docx" style="margin-top:14px;">⬇ Download DOCX</a>
+          </div>
+          <div class="card">
+            <h3>Individual Patient Reports</h3>
+            <p>Go to the Patients tab and click a patient — PDF and Word report downloads are on their detail panel.</p>
+            <a href="#patients" class="btn btn-outline btn-block admin-nav-link" data-target="patients" style="margin-top:14px;">Go to Patients →</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- USERS SECTION -->
+    <section id="section-users" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head">
+          <h3>User Management</h3>
+          <div class="content-toolbar">
+            <span class="field-hint" id="users-toolbar-hint">Create staff accounts (clinicians &amp; administrators).</span>
+            <button class="btn btn-primary btn-sm" id="users-create-btn">＋ Create Staff Account</button>
+          </div>
+        </div>
+        <div class="filter-pills mb-24" id="users-role-pills" data-manager="users">
+          <button class="filter-pill active" data-tab="all">All</button>
+          <button class="filter-pill" data-tab="patient">Patients</button>
+          <button class="filter-pill" data-tab="clinician">Clinicians</button>
+          <button class="filter-pill" data-tab="administrator">Administrators</button>
+          <button class="filter-pill" data-tab="pending">Pending Approval</button>
+        </div>
+        <div class="date-filter-bar mb-24">
+          <label>Role
+            <select class="status-select" id="users-role-filter" aria-label="Filter by role">
+              <option value="all">All roles</option>
+              <option value="patient">Patient</option>
+              <option value="clinician">Clinician</option>
+              <option value="admin">Admin</option>
+              <option value="super_admin">Super Admin</option>
+            </select>
+          </label>
+          <label>Status
+            <select class="status-select" id="users-status-filter" aria-label="Filter by status">
+              <option value="all">All statuses</option>
+              <option value="pending">Pending Approval</option>
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+              <option value="deactivated">Deactivated</option>
+              <option value="deleted">Deleted</option>
+            </select>
+          </label>
+          <label>From <input type="date" id="users-from"></label>
+          <label>To <input type="date" id="users-to"></label>
+          <button class="btn btn-ghost" id="users-filter-apply" style="font-size:0.85rem; padding:9px 16px;">Apply</button>
+          <button class="btn btn-ghost" id="users-filter-clear" style="font-size:0.85rem; padding:9px 16px;">Clear</button>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>ID</th><th>Name</th><th>Email / Phone</th><th>Role</th><th>Status</th><th>Registered</th><th></th></tr></thead>
+          <tbody id="users-body"><tr><td colspan="7">Loading...</td></tr></tbody>
+        </table>
+        <div class="pagination" id="users-pagination"></div>
+      </div>
+    </section>
+
+    <!-- AUDIT LOGS SECTION -->
+    <section id="section-audit" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head">
+          <h3>Audit Log</h3>
+          <div class="content-toolbar">
+            <select class="status-select" id="audit-action-filter" aria-label="Filter by action">
+              <option value="all">All actions</option>
+              <option value="create_user">Account created</option>
+              <option value="edit_user">Account updated</option>
+              <option value="reset_password">Password override</option>
+              <option value="set_status">Status changed</option>
+              <option value="delete_user">Account deleted</option>
+              <option value="purge_user">Account hard-deleted</option>
+              <option value="export_xlsx">XLSX export</option>
+              <option value="export_overview_pdf">Overview PDF</option>
+              <option value="export_docx">DOCX export</option>
+            </select>
+          </div>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+          <tbody id="audit-body"><tr><td colspan="5">Loading...</td></tr></tbody>
+        </table>
+        <div class="pagination" id="audit-pagination"></div>
+      </div>
+    </section>
+
+    <!-- MESSAGES SECTION -->
+    <section id="section-messages" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head"><h3>Contact Form Messages</h3></div>
+        <table class="admin-table">
+          <thead><tr><th>Name</th><th>Email / Phone</th><th>Message</th><th>Received</th><th>Reply status</th><th></th></tr></thead>
+          <tbody id="messages-body"><tr><td colspan="6">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- BLOG SECTION -->
+    <section id="section-blog" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head">
+          <h3>Blog Posts</h3>
+          <div class="content-toolbar">
+            <select class="status-select" id="blog-category-filter" aria-label="Filter by category">
+              <option value="all">All categories</option>
+            </select>
+            <button class="btn btn-primary btn-sm" id="blog-new-btn">＋ New Post</button>
+          </div>
+        </div>
+        <div class="filter-pills mb-24" id="blog-status-pills">
+          <button class="filter-pill active" data-status="all">All</button>
+          <button class="filter-pill" data-status="published">Published</button>
+          <button class="filter-pill" data-status="draft">Drafts</button>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Title</th><th>Category</th><th>Author</th><th>Status</th><th>Published</th><th></th></tr></thead>
+          <tbody id="blog-body"><tr><td colspan="6">Loading...</td></tr></tbody>
+        </table>
+        <div class="pagination" id="blog-pagination"></div>
+      </div>
+    </section>
+
+    <!-- RESEARCH SECTION -->
+    <section id="section-research" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head">
+          <h3>Research Publications</h3>
+          <div class="content-toolbar">
+            <select class="status-select" id="research-category-filter" aria-label="Filter by category">
+              <option value="all">All categories</option>
+            </select>
+            <button class="btn btn-primary btn-sm" id="research-new-btn">＋ New Paper</button>
+          </div>
+        </div>
+        <div class="filter-pills mb-24" id="research-status-pills">
+          <button class="filter-pill active" data-status="all">All</button>
+          <button class="filter-pill" data-status="published">Published</button>
+          <button class="filter-pill" data-status="draft">Drafts</button>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Title</th><th>Category</th><th>Author</th><th>Status</th><th>Published</th><th>File</th><th></th></tr></thead>
+          <tbody id="research-body"><tr><td colspan="7">Loading...</td></tr></tbody>
+        </table>
+        <div class="pagination" id="research-pagination"></div>
+      </div>
+    </section>
+    <section id="section-gait" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head">
+          <h3>Gait Lab Sessions</h3>
+          <div class="content-toolbar">
+            <select class="status-select" id="gait-status-filter" aria-label="Filter by status">
+              <option value="all">All statuses</option>
+              <option value="created">Created</option>
+              <option value="analyzed">Analyzed</option>
+              <option value="reviewed">Reviewed</option>
+            </select>
+            <a class="btn btn-outline btn-sm" id="gait-videos-dir" href="/uploads/gait/" target="_blank" style="display:none;">Raw videos</a>
+          </div>
+        </div>
+        <div class="filter-pills mb-24" id="gait-status-pills">
+          <button class="filter-pill active" data-status="all">All</button>
+          <button class="filter-pill" data-status="created">Created</button>
+          <button class="filter-pill" data-status="analyzed">Analyzed</button>
+          <button class="filter-pill" data-status="reviewed">Reviewed</button>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Session</th><th>Patient</th><th>Guardian / Phone</th><th>Status</th><th>Created</th><th>Analyzer</th><th></th></tr></thead>
+          <tbody id="gait-body"><tr><td colspan="7">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="section-settings" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head">
+          <h3>Clinic Settings</h3>
+          <div class="content-toolbar">
+            <a class="btn btn-outline btn-sm" id="backup-download-btn">⬇ Download Database Backup</a>
+          </div>
+        </div>
+        <p id="settings-role-hint" class="mb-24" style="opacity:0.75;"></p>
+        <form id="settings-form">
+          <div class="form-row">
+            <label for="settings-name">Clinic name</label>
+            <input type="text" id="settings-name" maxlength="120" required>
+          </div>
+          <div class="form-row">
+            <label for="settings-address">Address</label>
+            <input type="text" id="settings-address" maxlength="200">
+          </div>
+          <div class="form-row">
+            <label for="settings-phone">Phone</label>
+            <input type="text" id="settings-phone" maxlength="40">
+          </div>
+          <div class="form-row">
+            <label for="settings-email">Email</label>
+            <input type="email" id="settings-email" maxlength="120">
+          </div>
+
+          <h4 class="mt-24" style="border-top:1px solid #E1EEF8;padding-top:14px;margin-bottom:4px;">Outbound Email (SMTP)</h4>
+          <p style="font-size:.82rem;opacity:0.75;margin:0 0 14px;" id="smtp-status-badge"></p>
+          <div class="form-row">
+            <label for="smtp-host">SMTP host</label>
+            <input type="text" id="smtp-host" placeholder="smtp.gmail.com" maxlength="200">
+          </div>
+          <div class="form-row" style="display:grid; grid-template-columns:1fr auto; gap:12px; align-items:end;">
+            <div>
+              <label for="smtp-port">SMTP port</label>
+              <input type="text" id="smtp-port" value="587" maxlength="8">
+            </div>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap; padding-bottom:8px;">
+              <input type="checkbox" id="smtp-secure"> Use SSL/TLS (e.g. 465)
+            </label>
+          </div>
+          <div class="form-row">
+            <label for="smtp-user">SMTP username</label>
+            <input type="text" id="smtp-user" placeholder="you@example.com" maxlength="200">
+          </div>
+          <div class="form-row">
+            <label for="smtp-pass">SMTP password / app password</label>
+            <input type="password" id="smtp-pass" placeholder="Leave blank to keep the saved password" maxlength="300">
+          </div>
+          <div class="form-row">
+            <label for="smtp-from-name">Sender name (shown to visitors)</label>
+            <input type="text" id="smtp-from-name" placeholder="Bonsai Rehabilitation Center" maxlength="120">
+          </div>
+          <div class="form-row">
+            <label for="smtp-from-email">Sender email</label>
+            <input type="email" id="smtp-from-email" placeholder="Leave blank to use the SMTP username" maxlength="200">
+          </div>
+          <button type="button" class="btn btn-outline btn-sm" id="smtp-test-btn">Send test email</button>
+          <span id="smtp-test-msg" style="margin-left:12px; font-size:.85rem;"></span>
+
+          <button type="submit" class="btn btn-primary mt-24" id="settings-save-btn">Save Settings</button>
+          <span id="settings-msg" style="margin-left:12px; color:#C99436;"></span>
+        </form>
+        <p class="mt-24" style="opacity:0.75; font-size:0.85rem;">
+          These details appear on every generated report (PDF / XLSX / DOCX), so keep them up to date.
+          Only the Super Administrator can edit them. Download the database backup to keep a snapshot.
+        </p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- DETAIL MODAL (reused for both Patient detail and Assessment detail) -->
+<div id="detail-modal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <button class="modal-close" id="modal-close-btn">✕</button>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<!-- REPLY TO CONTACT MESSAGE MODAL -->
+<div id="reply-modal" class="modal-overlay" style="display:none;">
+  <div class="modal-box" style="max-width:640px;">
+    <button class="modal-close" onclick="closeReplyModal()">✕</button>
+    <h3 style="margin:0 0 6px;">Reply to message</h3>
+    <p style="color:#5A5D55;font-size:.85rem;margin:0 0 16px;">Customize your reply, then send it by email or save it as a note. Use the copy / WhatsApp buttons to reply on any channel.</p>
+
+    <div style="background:#F4F7F5;border:1px solid #E1EEF8;border-radius:10px;padding:12px 14px;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div>
+          <div style="font-weight:700;font-size:.95rem;" id="reply-name"></div>
+          <div style="font-size:.83rem;color:#5A5D55;">From <span id="reply-email"></span> <span id="reply-phone"></span></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline btn-sm" id="copy-email-btn" data-copy="" onclick="copyToClipboardBtn(this)">📋 Copy email</button>
+          <button type="button" class="btn btn-outline btn-sm" id="copy-phone-btn" data-copy="" onclick="copyToClipboardBtn(this)">📋 Copy phone</button>
+        </div>
+      </div>
+      <p style="background:#fff;border:1px solid #EDF2ED;border-radius:8px;padding:10px 12px;font-size:.87rem;margin:12px 0 0;max-height:90px;overflow:auto;" id="reply-message"></p>
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
+        <a class="btn btn-outline btn-sm" id="reply-mail-link" href="#" target="_blank">✉️ Open email draft</a>
+        <a class="btn btn-outline btn-sm" id="reply-wa-link" href="#" target="_blank">💬 WhatsApp draft</a>
+      </div>
+    </div>
+
+    <div style="font-size:.83rem;color:#5A5D55;margin-bottom:6px;">
+      Previously replied by <span id="reply-reply-to">—</span>
+    </div>
+    <textarea id="reply-textarea" rows="5" placeholder="Type the reply for this visitor… (kept on the message record; emailed when you choose Send)" style="width:100%;border:1px solid #D8E2D9;border-radius:8px;padding:10px 12px;font:inherit;box-sizing:border-box;"></textarea>
+
+    <p id="reply-smtp-hint" style="display:none;color:#B3452F;font-size:.82rem;margin:8px 0 0;">
+      Outbound email isn't configured yet — set it up in Settings → Email, then the Send button will work. You can still save the reply as a note or use the WhatsApp / email draft links.
+    </p>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:10px;flex-wrap:wrap;">
+      <span id="reply-status" style="font-size:.85rem;color:#B3452F;"></span>
+      <div style="display:flex;gap:8px;">
+        <button type="button" class="btn btn-outline btn-sm" onclick="closeReplyModal()">Cancel</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="submitMessageReply(false)">Save reply (no email)</button>
+        <button type="button" class="btn btn-primary btn-sm" id="reply-send-btn" onclick="submitMessageReply(true)">✉️ Send Email Reply</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/markdown.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>

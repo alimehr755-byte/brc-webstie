@@ -1,0 +1,88 @@
+?<!DOCTYPE html>
+<html lang="en">
+<head>
+	<script src="/js/mobile.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Online Assessment | Bonsai Rehabilitation Center</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="/index.html" class="brand">
+      <img src="/images/logo.png" alt="Bonsai Rehabilitation Center" class="brand-logo">
+    </a>
+    <button class="nav-toggle" aria-label="Toggle menu">&#9776;</button>
+    <ul class="nav-links">
+      <li><a href="/index.html">Home</a></li>
+      <li><a href="/about.html">About Us</a></li>
+      <li><a href="/services.html">Services</a></li>
+      <li><a href="/contact.html">Contact</a></li>
+      <li><a href="/assessment.html" class="active">Online Assessment</a></li>
+      <li><a href="/gait.html" class="active">Gait Lab</a></li>
+      <li><a href="/blog.html">Blog</a></li>
+      <li><a href="/research.html">Research</a></li>
+      <li id="nav-auth-slot" style="display:flex; gap:20px; align-items:center;">
+        <a href="/login.html">Log in</a>
+        <a href="/signup.html" class="nav-cta">Book an Appointment</a>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<div class="page-hero container">
+  <span class="section-eyebrow">Online Assessment</span>
+  <h1>Tell us about your child</h1>
+  <p>A few quick questions to help our therapists understand where to start. This takes about 5 minutes. It's a preliminary screening, not a diagnosis — one of our specialists reviews every submission personally.</p>
+</div>
+
+<div class="container" style="max-width: 760px;">
+
+  <div id="already-submitted" class="card card-md" style="display:none; margin-bottom:24px;">
+    <h3>You've already completed an assessment</h3>
+    <p id="previous-summary" style="margin-top:10px;"></p>
+    <div id="previous-conclusion-block" style="display:none; margin-top:16px; padding:16px; background:var(--sky-100); border-radius:var(--radius-sm);">
+      <strong>Our team's conclusion:</strong>
+      <p id="previous-conclusion" style="margin-top:6px;"></p>
+    </div>
+    <p class="form-footer-note" style="text-align:left; margin-top:16px;">Want to submit a new one anyway? <a href="#" id="retake-link">Start a new assessment</a></p>
+  </div>
+
+  <form id="assessment-form" class="card card-lg" style="display:none;">
+    <div id="assessment-msg" class="form-msg"></div>
+    <div id="questions-container">
+      <p class="empty-state">Loading questions...</p>
+    </div>
+
+    <div class="field" style="margin-top:8px;">
+      <label for="additionalNotes">Anything else you'd like us to know?</label>
+      <textarea id="additionalNotes" name="additionalNotes" placeholder="Optional — share anything else about your child's development or concerns."></textarea>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-block" id="assessment-submit">Submit Assessment</button>
+  </form>
+
+  <div id="result-card" class="card card-lg" style="display:none; margin-top:24px;">
+    <h3>Thank you — here's a preliminary look</h3>
+    <p id="result-summary" style="margin-top:10px; color:var(--ink-600);"></p>
+    <div id="result-domains" class="mt-24"></div>
+    <a href="/dashboard.html" class="btn btn-outline mt-24">Back to Dashboard</a>
+  </div>
+
+</div>
+
+<footer style="margin-top:60px;">
+  <div class="container">
+    <div class="footer-bottom">
+      <span>© 2026 Bonsai Rehabilitation Center. All rights reserved.</span>
+      <span>Growing every child's potential, together.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/js/main.js"></script>
+<script src="/js/assessment.js"></script>
+</body>
+</html>

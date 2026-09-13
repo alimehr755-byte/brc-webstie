@@ -1,0 +1,61 @@
+?<!DOCTYPE html>
+<html lang="en">
+<head>
+	<script src="/js/mobile.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Log In | Bonsai Rehabilitation Center</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="/index.html" class="brand">
+      <img src="/images/logo.png" alt="Bonsai Rehabilitation Center" class="brand-logo">
+    </a>
+    <button class="nav-toggle" aria-label="Toggle menu">&#9776;</button>
+    <ul class="nav-links">
+      <li><a href="/index.html">Home</a></li>
+      <li><a href="/about.html">About Us</a></li>
+      <li><a href="/services.html">Services</a></li>
+      <li><a href="/contact.html">Contact</a></li>
+      <li><a href="/assessment.html">Online Assessment</a></li>
+      <li><a href="/gait.html">Gait Lab</a></li>
+      <li><a href="/blog.html">Blog</a></li>
+      <li><a href="/research.html">Research</a></li>
+      <li id="nav-auth-slot" style="display:flex; gap:20px; align-items:center;">
+        <a href="/login.html">Log in</a>
+        <a href="/signup.html" class="nav-cta">Book an Appointment</a>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<div class="form-page">
+  <div class="form-card">
+    <h2>Welcome Back</h2>
+    <p class="subtitle">Log in with your phone number and password.</p>
+
+    <div id="login-msg" class="form-msg"></div>
+
+    <form id="login-form">
+      <div class="field">
+        <label for="username">Phone Number (Username) *</label>
+        <input type="text" id="username" name="username" required placeholder="e.g. +923001234567">
+      </div>
+      <div class="field">
+        <label for="password">Password *</label>
+        <input type="password" id="password" name="password" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block" id="login-submit">Log In</button>
+    </form>
+
+    <p class="form-footer-note">Don't have an account? <a href="/signup.html">Create one</a></p>
+  </div>
+</div>
+
+<script src="/js/main.js"></script>
+<script src="/js/auth.js"></script>
+</body>
+</html>

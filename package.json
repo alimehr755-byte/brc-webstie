@@ -1,0 +1,31 @@
+{
+  "name": "bonsai-rehab-center",
+  "version": "1.0.0",
+  "description": "Bonsai Rehabilitation Center website - full stack",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "migrate": "node db/migrate.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^13.0.3",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.6",
+    "docx": "^9.7.1",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "ffmpeg-static": "^5.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
+    "nodemailer": "^10.0.2",
+    "pdfkit": "^0.19.1"
+  },
+  "allowScripts": {
+    "ffmpeg-static@5.3.0": true
+  }
+}

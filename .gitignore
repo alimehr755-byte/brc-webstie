@@ -1,0 +1,24 @@
+node_modules/
+db/brc.db
+db/brc.db-shm
+db/brc.db-wal
+.env
+uploads/
+mobile/node_modules/
+mobile/dist/
+mobile/keystore/
+
+# ---- heavy dev-only media + caches: never deploy, never push ----
+gait vedios/
+gait lab/promo/
+gait lab/*.mp4
+gait lab/overlay_output.mp4
+gait lab/gait_cycle_plot.png
+gait lab/full_rom_plot.png
+gait lab/New Text Document.txt
+gait lab/__pycache__/
+gait lab/gait_lab_promo_vertical.mp4
+python/__pycache__/
+!gait lab/pose_landmarker_full.task
+!gait lab/pose_landmarker_heavy.task
+!gait lab/pose_landmarker_light.task

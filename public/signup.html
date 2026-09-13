@@ -1,0 +1,101 @@
+?<!DOCTYPE html>
+<html lang="en">
+<head>
+	<script src="/js/mobile.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Create Account | Bonsai Rehabilitation Center</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="/index.html" class="brand">
+      <img src="/images/logo.png" alt="Bonsai Rehabilitation Center" class="brand-logo">
+    </a>
+    <button class="nav-toggle" aria-label="Toggle menu">&#9776;</button>
+    <ul class="nav-links">
+      <li><a href="/index.html">Home</a></li>
+      <li><a href="/about.html">About Us</a></li>
+      <li><a href="/services.html">Services</a></li>
+      <li><a href="/contact.html">Contact</a></li>
+      <li><a href="/assessment.html">Online Assessment</a></li>
+      <li><a href="/gait.html">Gait Lab</a></li>
+      <li><a href="/blog.html">Blog</a></li>
+      <li><a href="/research.html">Research</a></li>
+      <li id="nav-auth-slot" style="display:flex; gap:20px; align-items:center;">
+        <a href="/login.html">Log in</a>
+        <a href="/signup.html" class="nav-cta">Book an Appointment</a>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<div class="form-page">
+  <div class="form-card wide">
+    <h2>Create Your Family Account</h2>
+    <p class="subtitle">Your phone number becomes your username. You'll use it to log in and book appointments.</p>
+
+    <div id="signup-msg" class="form-msg"></div>
+
+    <form id="signup-form">
+      <div class="field">
+        <label for="guardianName">Your Name (Parent / Guardian) *</label>
+        <input type="text" id="guardianName" name="guardianName" required placeholder="e.g. Ayesha Khan">
+      </div>
+
+      <div class="field">
+        <label for="childName">Child's Name *</label>
+        <input type="text" id="childName" name="childName" required placeholder="e.g. Ali Khan">
+      </div>
+
+      <div class="field">
+        <label for="diagnosis">Diagnosis (if known)</label>
+        <input type="text" id="diagnosis" name="diagnosis" placeholder="e.g. Cerebral Palsy, Autism, Speech Delay...">
+      </div>
+
+      <div class="field">
+        <label for="phone">Phone Number * (this becomes your username)</label>
+        <div class="field-row">
+          <select id="countryCode" name="countryCode" required>
+            <option value="+92" selected>🇵🇰 +92</option>
+            <option value="+91">🇮🇳 +91</option>
+            <option value="+971">🇦🇪 +971</option>
+            <option value="+966">🇸🇦 +966</option>
+            <option value="+1">🇺🇸 +1</option>
+            <option value="+44">🇬🇧 +44</option>
+            <option value="+61">🇦🇺 +61</option>
+            <option value="+90">🇹🇷 +90</option>
+          </select>
+          <input type="tel" id="phone" name="phone" required placeholder="3001234567">
+        </div>
+        <p class="field-hint">Enter digits only, without the country code.</p>
+      </div>
+
+      <div class="field">
+        <label for="address">Address</label>
+        <input type="text" id="address" name="address" placeholder="Street, area, city">
+      </div>
+
+      <div class="field">
+        <label for="password">Password *</label>
+        <input type="password" id="password" name="password" required minlength="6" placeholder="At least 6 characters">
+      </div>
+
+      <div class="field">
+        <label for="confirmPassword">Confirm Password *</label>
+        <input type="password" id="confirmPassword" name="confirmPassword" required minlength="6">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block" id="signup-submit">Create Account</button>
+    </form>
+
+    <p class="form-footer-note">Already have an account? <a href="/login.html">Log in</a></p>
+  </div>
+</div>
+
+<script src="/js/main.js"></script>
+<script src="/js/auth.js"></script>
+</body>
+</html>

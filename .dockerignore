@@ -1,0 +1,52 @@
+# BRC deploy — Render/Docker build context
+# Keep the image lean: server source + python gait engine + ML models only.
+
+# Node
+node_modules/
+
+# Secrets / runtime-local state (never in an image)
+.env
+.env.local
+mobile/keystore/
+uploads/
+backups/
+db/*.db
+db/*.db-shm
+db/*.db-wal
+
+# Python caches / virtual envs
+**/__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Mobile native source — belongs in git, NOT in the web-server image.
+# (Render builds the web service; the Android/iOS projects only matter on a
+#  developer machine where we run `npx cap sync` + gradle.)
+mobile/android/
+mobile/ios/
+mobile/dist/
+mobile/node_modules/
+
+# Promo / demo / gait media (huge, dev-only)
+gait vedios/
+gait lab/promo/
+gait lab/*.mp4
+gait lab/output.mp4
+gait lab/overlay_output.mp4
+gait lab/*.png
+gait lab/*.txt
+gait lab/New Text Document.txt
+gait lab/walk.mp4
+*.mp4
+*.wav
+*.task.bak
+
+# VCS + CI
+.git
+.gitignore
+.dockerignore
+
+# render config lives at repo root for Render's blueprint reader; it does not
+# need to be baked into the image.
+render.yaml

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<script src="/js/mobile.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Gait Lab | Bonsai Rehabilitation Center</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .gait-bar { height: 18px; background: #F0F7FC; border-radius: 9px; overflow: hidden; display: flex; }
+  .gait-stance { background: #46B4DC; height: 100%; }
+  .gait-swing { background: #9fc3e0; height: 100%; }
+  .phase-row { display: grid; grid-template-columns: 1fr 90px 80px 80px 80px 80px 100px; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px dashed #E1EEF8; font-size: .88rem; }
+  .phase-row.phase-head { grid-template-columns: 1fr 90px 80px 80px 80px 80px 100px; font-weight:600; }
+  .phase-timeline { display:flex; height:26px; border-radius:8px; overflow:hidden; margin:12px 0 4px; }
+  .phase-seg { display:flex; align-items:center; justify-content:center; font-size:.62rem; font-weight:700; color:#0e1b14; white-space:nowrap; border-right:1px solid rgba(0,0,0,.15); min-width:0; }
+  .phase-seg:last-child { border-right:none; }
+  .seg-stance { background:#46B4DC; }
+  .seg-swing { background:#9fc3e0; }
+  .delta-ok { color:var(--sage-700); }
+  .delta-pos { color:#B3452F; }
+  .delta-neg { color:#258DC1; }
+  .gait-legend { display:flex; gap:16px; font-size:.78rem; color:var(--ink-600); margin-top:6px; }
+  .gait-legend .dot { width:10px; height:10px; border-radius:2px; display:inline-block; margin-right:5px; vertical-align:middle; }
+  .flag-chip { display:inline-block; padding:2px 8px; border-radius:99px; font-size:.72rem; font-weight:600; text-transform:capitalize; }
+  .flag-prolonged { background:#FDF3E3; color:#C99436; }
+  .flag-accelerated { background:#E8F4FD; color:#258DC1; }
+  .flag-missing { background:#FBE9E4; color:#B3452F; }
+  .flag-normal { background:#EAF6EE; color:#2F7A4D; }
+  .sev-major { border-left:3px solid #B3452F; padding-left:10px; }
+  .sev-moderate { border-left:3px solid #C99436; padding-left:10px; }
+  .sev-minor { border-left:3px solid #46B4DC; padding-left:10px; }
+  .upload-zone { border:2px dashed #cfe0ec; border-radius:12px; padding:22px; text-align:center; background:#FBFDFE; }
+  .upload-zone.hover { border-color:#46B4DC; background:#F0F7FC; }
+  .video-preview video { width:100%; border-radius:8px; background:#0e1b14; }
+  .cv-plane { background:#fff; border:1px solid #E1EEF8; border-radius:12px; padding:14px; }
+  .cv-plane h5 { margin:0; }
+  @media (max-width:760px) { .cv-plane { grid-column:1; } }
+  /* 2e.txt — gait-validity rejection notice + modal */
+  .gait-rejection-banner { background:#FDF3F1; border:1px solid #F1CFC9; border-left:4px solid #B3452F; border-radius:10px; padding:16px 18px; margin:6px 0 18px; }
+  .gait-rejection-banner h4 { color:#B3452F; }
+  #gait-rejection-modal { position:fixed; inset:0; background:rgba(14,27,20,.5); display:flex; align-items:center; justify-content:center; z-index:1200; padding:18px; }
+  #gait-rejection-modal[hidden] { display:none; }
+  #gait-rejection-modal .modal-card { background:#fff; border-radius:14px; max-width:540px; width:100%; padding:22px 24px; box-shadow:0 18px 50px rgba(14,27,20,.35); }
+  #gait-rejection-modal .modal-card h3 { margin:0 0 10px; color:#B3452F; font-size:1.05rem; }
+  #gait-rejection-modal .modal-card p { margin:0 0 12px; color:var(--ink-700); font-size:.92rem; line-height:1.5; }
+  #gait-rejection-modal .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
+  /* rules.md — metadata bar, KPI cards, plane tabs, collapsible integrity */
+  .gait-meta { background:#FBFDFE; border:1px solid #E1EEF8; border-radius:12px; padding:12px 14px; }
+  .gait-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:12px; }
+  .gait-kpi { background:#fff; border:1px solid #E1EEF8; border-radius:12px; padding:14px; box-shadow:0 2px 6px rgba(14,27,20,.05); align-self:start; }
+  .gait-kpi-label { font-size:.72rem; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:#1E3C82; margin:0; }
+  .gait-kpi-value { font-size:1.35rem; font-weight:700; color:#1E3C82; margin:6px 0 0; }
+  .gait-tabs { display:flex; gap:6px; flex-wrap:wrap; border-bottom:2px solid #E1EEF8; padding-bottom:8px; }
+  .gait-tab { padding:8px 14px; border-radius:9px; border:1px solid #E1EEF8; background:#FBFDFE; font-weight:600; font-size:.86rem; color:var(--ink-600); cursor:pointer; }
+  .gait-tab:hover { background:#F0F7FC; }
+  .gait-tab.active { background:#1E3C82; border-color:#1E3C82; color:#fff; }
+  .gait-tab-panel { display:none; margin-top:14px; }
+  .gait-tab-panel[data-default="1"] { display:block; }
+  .gait-details { border:1px solid #E1EEF8; background:#FBFDFE; border-radius:12px; padding:12px 14px; }
+  .gait-details summary { cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap; list-style:none; }
+  .gait-details summary::-webkit-details-marker { display:none; }
+  .gait-details summary::before { content:'▸'; color:#258DC1; font-size:.9rem; transition:transform .15s ease; }
+  .gait-details[open] summary::before { transform:rotate(90deg); }
+  /* multi-view switcher (staff preview) */
+  .view-switch-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#FBFDFE; border:1px solid #E1EEF8; border-radius:12px; padding:8px 12px; margin-bottom:6px; }
+  .view-switch-label { font-size:.78rem; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:var(--ink-500); }
+  .view-switch-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+  .view-switch { cursor:pointer; }
+  .view-switch:disabled { opacity:.5; cursor:not-allowed; }
+  /* SVG stride timeline */
+  .stride-timeline { background:#FBFDFE; border:1px solid #E1EEF8; border-radius:10px; padding:8px 10px; }
+  .stride-timeline svg { width:100%; height:auto; display:block; }
+  .stride-seg { cursor:pointer; outline:none; }
+  .stride-seg:hover rect { stroke:#1E3C82; stroke-width:2; }
+  .stride-seg.selected rect { stroke:#1E3C82; stroke-width:2.5; filter:drop-shadow(0 1px 2px rgba(14,27,20,.25)); }
+  .stride-seg.flagged rect { stroke:#B3452F; }
+  /* symmetry dials */
+  .dial-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-top:10px; }
+  .dial { background:#fff; border:1px solid #E1EEF8; border-radius:12px; padding:8px 6px 10px; text-align:center; align-self:start; }
+  .dial svg { width:100%; height:auto; max-height:96px; }
+  .dial-label { font-size:.76rem; font-weight:700; color:#1E3C82; margin-top:2px; }
+  .dial-sub { font-size:.68rem; color:var(--ink-500); }
+  /* QA warnings */
+  .qa-warnings { background:#FDF3F1; border:1px solid #F1CFC9; border-left:4px solid #B3452F; border-radius:10px; padding:12px 14px; }
+  /* OCR panel + chips */
+  .gait-details-card { background:#fff; border:1px solid #E1EEF8; border-radius:12px; padding:12px 14px; }
+  .ocr-chip { display:inline-block; background:#E8F4FD; color:#1E3C82; border-radius:99px; padding:2px 8px; font-size:.72rem; margin:2px 2px 0 0; }
+  .ocr-seen { font-size:.78rem; color:var(--ink-500); }
+  /* JSON viewer + diff */
+  .json-view { background:#0e1b14; color:#E8F4FD; border-radius:10px; padding:12px 14px; font-size:.74rem; line-height:1.5; overflow-x:auto; max-height:420px; overflow-y:auto; }
+  .json-view .j-key { color:#46B4DC; }
+  .json-view .j-str { color:#A8D5A2; }
+  .json-view .j-num { color:#EBD7A8; }
+  .json-view .j-bool { color:#C99436; font-weight:700; }
+  .j-del { color:#B3452F; font-weight:600; }
+  .gait-details select, .gait-details button { vertical-align:middle; }
+  /* progression grid */
+  .prog-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; align-items:start; }
+  /* diff modal */
+  .diff-overlay { position:fixed; inset:0; background:rgba(14,27,20,.55); display:flex; align-items:center; justify-content:center; z-index:1300; padding:18px; }
+  .diff-overlay .modal-card { background:#fff; border-radius:14px; max-width:760px; width:100%; padding:20px 22px; box-shadow:0 18px 50px rgba(14,27,20,.35); }
+  .diff-overlay .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:12px; }
+  @media (prefers-reduced-motion: reduce) { .stride-seg, .view-switch { transition:none !important; } }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="/index.html" class="brand">
+      <img src="/images/logo.png" alt="Bonsai Rehabilitation Center" class="brand-logo">
+    </a>
+    <button class="nav-toggle" aria-label="Toggle menu">&#9776;</button>
+    <ul class="nav-links">
+      <li><a href="/index.html">Home</a></li>
+      <li><a href="/about.html">About Us</a></li>
+      <li><a href="/services.html">Services</a></li>
+      <li><a href="/assessment.html">Online Assessment</a></li>
+      <li><a href="/gait.html" class="active">Gait Lab</a></li>
+      <li><a href="/blog.html">Blog</a></li>
+      <li><a href="/research.html">Research</a></li>
+      <li id="nav-auth-slot" style="display:flex; gap:20px; align-items:center;">
+        <a href="/login.html">Log in</a>
+        <a href="/signup.html" class="nav-cta">Book an Appointment</a>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<header class="dash-header">
+  <div class="container">
+    <div>
+      <h1>Gait Laboratory</h1>
+      <p>Upload side-on and front-on walking videos; get a granular cycle-by-cycle analysis from our clinical pipeline.</p>
+    </div>
+  </div>
+</header>
+
+<div class="dash-body container">
+
+  <div class="card card-lg mb-24" id="new-session-card">
+    <h3 class="mb-16">New Gait Analysis Session</h3>
+    <div id="gait-msg" class="form-msg" style="display:none;"></div>
+    <p class="mt-8" style="color:var(--ink-600); font-size:.9rem;">
+      Record your child walking a short straight line in a well-lit room, full body visible.
+      Use two devices (or two takes): <strong>Frontal Plane</strong> (directly in front) and
+      <strong>Sagittal Plane</strong> (from the side, perpendicular to walk direction) —
+      or a single <strong>Combined Dual-Plane Video</strong> that captures both views at once.
+      Videos are optional here — you can create a session now and add each clip from its card later.
+    </p>
+    <div class="grid grid-2 mt-16">
+      <div class="upload-zone" id="frontal-zone">
+        <p><strong>Frontal Plane video</strong></p>
+        <p style="color:var(--ink-600); font-size:.85rem;">Face-on view (MP4 / MOV / WebM, max 200&nbsp;MB)</p>
+        <input type="file" id="frontal-input" accept="video/*" class="mt-12" style="font-size:.85rem;">
+        <p class="mt-8" id="frontal-name" style="font-size:.8rem; color:var(--sage-700);"></p>
+      </div>
+      <div class="upload-zone" id="sagittal-zone">
+        <p><strong>Sagittal Plane video</strong></p>
+        <p style="color:var(--ink-600); font-size:.85rem;">Side-on view (MP4 / MOV / WebM, max 200&nbsp;MB)</p>
+        <input type="file" id="sagittal-input" accept="video/*" class="mt-12" style="font-size:.85rem;">
+        <p class="mt-8" id="sagittal-name" style="font-size:.8rem; color:var(--sage-700);"></p>
+      </div>
+      <div class="upload-zone" id="combined-zone" style="grid-column:1 / -1;">
+        <p><strong>Combined Dual-Plane Video (Simultaneous Frontal &amp; Sagittal Capture)</strong></p>
+        <p style="color:var(--ink-600); font-size:.85rem;">One recording with both views captured together (e.g. split-screen or stacked — we separate the planes automatically). MP4 / MOV / WebM, max 200&nbsp;MB.</p>
+        <input type="file" id="combined-input" accept="video/*" class="mt-12" style="font-size:.85rem;">
+        <p class="mt-8" id="combined-name" style="font-size:.8rem; color:var(--sage-700);"></p>
+      </div>
+    </div>
+    <div class="field mt-16">
+      <label for="gait-notes">Notes for the clinical team</label>
+      <textarea id="gait-notes" placeholder="e.g. wearing shoes, walked 8 steps, has been using a DAFO for 2 months"></textarea>
+    </div>
+    <div class="field mt-16">
+      <label for="gait-speed-hint">Playback speed of the recording <span style="color:var(--ink-500); font-weight:400;">(helps us measure cadence accurately)</span></label>
+      <select id="gait-speed-hint">
+        <option value="auto">Auto-detect (recommended)</option>
+        <option value="normal">Normal Walk — Real-Time</option>
+        <option value="running">Running / Treadmill</option>
+        <option value="slowmo_120">Slow-Motion (120 FPS)</option>
+        <option value="slowmo_240">Slow-Motion (240 FPS)</option>
+      </select>
+    </div>
+    <div class="field mt-16">
+      <label for="gait-height-cm">Patient standing height — cm <span style="color:var(--ink-500); font-weight:400;">(optional; enables metric segment lengths e.g. femur &amp; tibia in cm)</span></label>
+      <input type="number" id="gait-height-cm" min="50" max="260" step="0.5" placeholder="e.g. 152 cm">
+    </div>
+    <div class="grid grid-2 mt-16">
+      <div class="field">
+        <label for="gait-age">Patient age — years <span style="color:var(--ink-500); font-weight:400;">(optional)</span></label>
+        <input type="number" id="gait-age" min="0" max="120" step="0.5" placeholder="e.g. 8">
+      </div>
+      <div class="field">
+        <label for="gait-gender">Gender</label>
+        <select id="gait-gender">
+          <option value="">Not specified</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid grid-2 mt-16">
+      <div class="field">
+        <label for="gait-body-mass">Body mass — kg <span style="color:var(--ink-500); font-weight:400;">(optional)</span></label>
+        <input type="number" id="gait-body-mass" min="1" max="500" step="0.1" placeholder="e.g. 25">
+      </div>
+      <div class="field">
+        <label for="gait-clinician">Assessing clinician <span style="color:var(--ink-500); font-weight:400;">(optional)</span></label>
+        <input type="text" id="gait-clinician" placeholder="e.g. Dr. A. Khan">
+      </div>
+    </div>
+    <button class="btn btn-primary" id="create-session-btn">Create Session</button>
+  </div>
+
+  <div class="dash-card">
+    <h3 class="mb-16">Your Gait Sessions</h3>
+    <div id="gait-sessions-list"><p class="empty-state">Loading sessions...</p></div>
+  </div>
+
+  <div id="report-view">
+    <div class="card card-lg" id="report-panel" style="display:none;">
+      <div id="report-body"></div>
+    </div>
+  </div>
+
+  <!-- 2e.txt — professional notification for recordings that fail the gait-validity gate -->
+  <div id="gait-rejection-modal" hidden role="alertdialog" aria-modal="true" aria-labelledby="gait-rejection-modal-title">
+    <div class="modal-card">
+      <h3 id="gait-rejection-modal-title">Recording requires re-capture</h3>
+      <p id="gait-rejection-modal-text">The uploaded video does not contain a recognizable walking (gait) pattern. Please upload a clear video of the patient walking straight in the specified plane to proceed with the clinical analysis.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="gait-rejection-modal-close">OK</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <div class="container">
+    <div class="footer-bottom">
+      <span>© 2026 Bonsai Rehabilitation Center. All rights reserved.</span>
+      <span>Growing every child's potential, together.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/vendor/chart.umd.min.js"></script>
+  <script>
+    // Local Chart.js first; fall back to CDN only if the vendored copy is missing or fails to load.
+    if (typeof Chart === 'undefined') {
+      var cd = document.createElement('script');
+      cd.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js';
+      cd.onerror = function () { console.warn('Chart.js CDN fallback failed.'); };
+      document.head.appendChild(cd);
+    }
+  </script>
+  <script src="/js/main.js"></script>
+  <script src="/js/gait.js"></script>
+</body>
+</html>
