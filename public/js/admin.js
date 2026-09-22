@@ -1,4 +1,4 @@
-﻿// public/js/admin.js
+// public/js/admin.js
 // Guards the admin dashboard (must be logged in with role 'admin' or 'super_admin'),
 // loads overview stats + charts, and powers the Patients/Appointments/Assessments/Reports/Messages tables,
 // plus the classified User Management (users + audit logs) sections.
@@ -101,6 +101,8 @@ function applyRoleAccess(role) {
 const ACTION_LABELS = {
   create_user: 'Account created', edit_user: 'Account updated', reset_password: 'Password override',
   set_status: 'Status changed', delete_user: 'Account deleted', purge_user: 'Account hard-deleted',
+  delete_patient: 'Patient deleted', appointment_delete: 'Appointment deleted',
+  assessment_delete: 'Assessment deleted', contact_delete: 'Message deleted',
   export_xlsx: 'XLSX export', export_overview_pdf: 'Overview PDF', export_docx: 'DOCX export',
   update_settings: 'Settings updated', backup_database: 'Database backup',
   blog_create: 'Blog post created', blog_update: 'Blog post updated', blog_delete: 'Blog post deleted',
@@ -416,15 +418,24 @@ function renderPatientsTable(patients) {
     <tr>
       <td>${escapeHtml(p.guardian_name)}</td>
       <td>${escapeHtml(p.child_name)}</td>
-      <td>${escapeHtml(p.diagnosis || 'â€”')}</td>
+      <td>${escapeHtml(p.diagnosis || '—')}</td>
       <td>${escapeHtml(p.diagnosis_category)}</td>
       <td>${escapeHtml(p.username)}</td>
       <td>${p.appointment_count}</td>
-      <td><button class="row-link" data-patient-id="${p.id}">View â†’</button></td>
+      <td>
+        <button class="row-link" data-patient-id="${p.id}">View →</button>
+        ${window.dashboardAccess && window.dashboardAccess.canAct ? `<button class="row-link danger-link" data-patient-delete="${p.id}">Delete</button>` : ''}
+      </td>
     </tr>
   `).join('');
   body.querySelectorAll('[data-patient-id]').forEach(btn => {
     btn.addEventListener('click', () => openPatientModal(btn.dataset.patientId));
+  });
+  body.querySelectorAll('[data-patient-delete]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = patientsCache.find(x => String(x.id) === String(btn.dataset.patientDelete));
+      deletePatient(p);
+    });
   });
 }
 
@@ -438,7 +449,7 @@ async function openPatientModal(id) {
 
     modalContent.innerHTML = `
       <h2>${escapeHtml(patient.child_name)}</h2>
-      <p style="color:var(--ink-600); margin-bottom:20px;">Guardian: ${escapeHtml(patient.guardian_name)} Â· ${escapeHtml(patient.username)}</p>
+      <p style="color:var(--ink-600); margin-bottom:20px;">Guardian: ${escapeHtml(patient.guardian_name)} · ${escapeHtml(patient.username)}</p>
 
       <div class="modal-section">
         <h4>Profile</h4>
@@ -453,11 +464,11 @@ async function openPatientModal(id) {
         ${appointments.length === 0 ? '<p style="color:var(--ink-600);">None yet.</p>' : appointments.map(a => `
           <div class="modal-domain-row" style="flex-direction:column; align-items:flex-start; gap:4px;">
             <div style="display:flex; justify-content:space-between; width:100%;">
-              <span>${escapeHtml(a.therapy_types.join(', '))} â€” ${a.mode === 'online' ? 'Online' : 'In-Clinic'}</span>
+              <span>${escapeHtml(a.therapy_types.join(', '))} — ${a.mode === 'online' ? 'Online' : 'In-Clinic'}</span>
               <span class="status-badge status-${a.status}">${a.status}</span>
             </div>
             <span style="font-size:0.8rem; color:var(--ink-600);">
-              Preferred date: ${a.preferred_date ? formatDate(a.preferred_date) : 'Not specified'} Â· Booked ${formatDate(a.created_at)}
+              Preferred date: ${a.preferred_date ? formatDate(a.preferred_date) : 'Not specified'} · Booked ${formatDate(a.created_at)}
             </span>
             ${a.notes ? `<span style="font-size:0.8rem; color:var(--ink-600);">Notes: ${escapeHtml(a.notes)}</span>` : ''}
           </div>
@@ -481,8 +492,8 @@ async function openPatientModal(id) {
       <div class="modal-section">
         <h4>Export This Patient's Report</h4>
         <div class="modal-export-row">
-          <a class="btn btn-outline" href="/api/admin/export/patient/${patient.id}/report.pdf" style="font-size:0.85rem;">â¬‡ PDF Report</a>
-          <a class="btn btn-outline" href="/api/admin/export/patient/${patient.id}/report.docx" style="font-size:0.85rem;">â¬‡ Word Report</a>
+          <a class="btn btn-outline" href="/api/admin/export/patient/${patient.id}/report.pdf" style="font-size:0.85rem;">↓ PDF Report</a>
+          <a class="btn btn-outline" href="/api/admin/export/patient/${patient.id}/report.docx" style="font-size:0.85rem;">↓ Word Report</a>
         </div>
       </div>
 
@@ -558,13 +569,13 @@ function setupAppointmentFilters() {
 
 async function loadAppointments(status) {
   const body = document.getElementById('appointments-body');
-  body.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+  body.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
   try {
     const url = status === 'all' ? '/api/admin/appointments' : `/api/admin/appointments?status=${status}`;
     const res = await fetch(url);
     const { appointments } = await res.json();
     if (appointments.length === 0) {
-      body.innerHTML = '<tr><td colspan="6">No appointments found.</td></tr>';
+      body.innerHTML = '<tr><td colspan="7">No appointments found.</td></tr>';
       return;
     }
     body.innerHTML = appointments.map(a => {
@@ -582,6 +593,7 @@ async function loadAppointments(status) {
           <td>${a.preferred_date ? formatDate(a.preferred_date) : '—'}</td>
           <td>${formatDate(a.created_at)}</td>
           <td>${statusCell}</td>
+          <td>${window.dashboardAccess && window.dashboardAccess.canAct ? `<button class="row-link danger-link" data-appointment-delete="${a.id}">Delete</button>` : ''}</td>
         </tr>
       `;
     }).join('');
@@ -601,8 +613,11 @@ async function loadAppointments(status) {
         }
       });
     });
+    body.querySelectorAll('[data-appointment-delete]').forEach(btn => {
+      btn.addEventListener('click', () => deleteAppointment(btn.dataset.appointmentDelete));
+    });
   } catch (err) {
-    body.innerHTML = '<tr><td colspan="6">Could not load appointments.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7">Could not load appointments.</td></tr>';
   }
 }
 
@@ -621,13 +636,13 @@ function setupAssessmentFilters() {
 
 async function loadAssessments(status) {
   const body = document.getElementById('assessments-body');
-  body.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+  body.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
   try {
     const url = status === 'all' ? '/api/admin/assessments' : `/api/admin/assessments?status=${status}`;
     const res = await fetch(url);
     const { assessments } = await res.json();
     if (assessments.length === 0) {
-      body.innerHTML = '<tr><td colspan="6">No assessments found.</td></tr>';
+      body.innerHTML = '<tr><td colspan="7">No assessments found.</td></tr>';
       return;
     }
     body.innerHTML = assessments.map(a => `
@@ -637,14 +652,18 @@ async function loadAssessments(status) {
         <td>${a.flaggedDomains.length ? escapeHtml(a.flaggedDomains.join(', ')) : '<span style="color:var(--ink-600);">None</span>'}</td>
         <td>${formatDate(a.createdAt)}</td>
         <td><span class="status-badge status-${a.status === 'reviewed' ? 'completed' : 'pending'}">${a.status.replace('_', ' ')}</span></td>
-        <td><button class="row-link" data-assessment-id="${a.id}">${a.status === 'reviewed' ? 'View â†’' : 'Review â†’'}</button></td>
+        <td><button class="row-link" data-assessment-id="${a.id}">${a.status === 'reviewed' ? 'View →' : 'Review →'}</button></td>
+        <td>${window.dashboardAccess && window.dashboardAccess.canAct ? `<button class="row-link danger-link" data-assessment-delete="${a.id}">Delete</button>` : ''}</td>
       </tr>
     `).join('');
     body.querySelectorAll('[data-assessment-id]').forEach(btn => {
       btn.addEventListener('click', () => openAssessmentModal(btn.dataset.assessmentId));
     });
+    body.querySelectorAll('[data-assessment-delete]').forEach(btn => {
+      btn.addEventListener('click', () => deleteAssessment(btn.dataset.assessmentDelete));
+    });
   } catch (err) {
-    body.innerHTML = '<tr><td colspan="6">Could not load assessments.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7">Could not load assessments.</td></tr>';
   }
 }
 
@@ -672,7 +691,7 @@ async function openAssessmentModal(id) {
 
     modalContent.innerHTML = `
       <h2>${escapeHtml(a.childName)}</h2>
-      <p style="color:var(--ink-600); margin-bottom:20px;">Guardian: ${escapeHtml(a.guardianName)} Â· ${escapeHtml(a.username)} Â· Submitted ${formatDate(a.createdAt)}</p>
+      <p style="color:var(--ink-600); margin-bottom:20px;">Guardian: ${escapeHtml(a.guardianName)} · ${escapeHtml(a.username)} · Submitted ${formatDate(a.createdAt)}</p>
 
       <div class="modal-section">
         <h4>Preliminary Summary (shown to patient)</h4>
@@ -694,7 +713,7 @@ async function openAssessmentModal(id) {
         <h4>Staff Conclusion</h4>
         ${a.adminConclusion ? `
           <p style="font-size:0.9rem; padding:12px; background:var(--sky-100); border-radius:8px;">${escapeHtml(a.adminConclusion)}</p>
-          <p style="font-size:0.78rem; color:var(--ink-600); margin-top:6px;">â€” ${escapeHtml(a.adminReviewer || 'Staff')}, ${formatDate(a.reviewedAt)}</p>
+          <p style="font-size:0.78rem; color:var(--ink-600); margin-top:6px;">— ${escapeHtml(a.adminReviewer || 'Staff')}, ${formatDate(a.reviewedAt)}</p>
         ` : `
           <div id="conclusion-msg" class="form-msg"></div>
           <div class="field">
@@ -785,6 +804,96 @@ function hideModal() {
   if (box) box.classList.remove('wide');
 }
 
+// ---- Shared typed-confirmation delete dialog (records in the admin tables) ----
+// `opts`: { title, description, endpoint, token='DELETE', tokenLabel='DELETE',
+//           buttonLabel='Delete', reload }
+function openDeleteConfirm(opts) {
+  const modalContent = document.getElementById('modal-content');
+  const modalBox = modalContent.parentElement;
+  const tokenLabel = opts.tokenLabel || 'DELETE';
+  modalBox.classList.remove('wide');
+  modalContent.innerHTML = `
+    <h2 style="color:var(--danger);">${opts.title}</h2>
+    <p class="field-hint">${opts.description}</p>
+    <div class="modal-section">
+      <div class="field"><label for="del-confirm">Type <strong>${escapeHtml(tokenLabel)}</strong> to confirm</label><input type="text" id="del-confirm" maxlength="12" autocomplete="off"></div>
+    </div>
+    <div id="del-msg" class="form-msg"></div>
+    <div class="editor-actions">
+      <button class="btn btn-primary" id="del-save" disabled style="background:var(--danger);">${opts.buttonLabel || 'Delete'}</button>
+      <button class="btn btn-ghost" id="del-cancel">Cancel</button>
+    </div>
+  `;
+  showModal();
+  document.getElementById('del-cancel').addEventListener('click', hideModal);
+  const confirmEl = document.getElementById('del-confirm');
+  const saveBtn = document.getElementById('del-save');
+  confirmEl.addEventListener('input', () => {
+    saveBtn.disabled = confirmEl.value.trim().toUpperCase() !== (opts.token || 'DELETE').toUpperCase();
+  });
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Deleting...';
+    const msgEl = document.getElementById('del-msg');
+    try {
+      const res = await fetch(opts.endpoint, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: opts.token || 'DELETE' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not delete.');
+      showFormMsg(msgEl, data.message, 'success');
+      if (typeof opts.reload === 'function') opts.reload();
+      setTimeout(hideModal, 6000);
+    } catch (err) {
+      showFormMsg(msgEl, err.message, 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = opts.buttonLabel || 'Delete';
+    }
+  });
+}
+
+function deletePatient(p) {
+  if (!p) return;
+  openDeleteConfirm({
+    title: 'Delete Patient — ' + escapeHtml(p.child_name || p.guardian_name),
+    description: 'This is a <strong>soft delete</strong>: the patient account is hidden from the patient list and cannot log in, but its records are retained for the audit trail.',
+    endpoint: `/api/admin/patients/${p.id}`,
+    reload: loadPatients
+  });
+}
+
+function deleteAppointment(id) {
+  const active = document.querySelector('#appt-filter-pills .filter-pill.active')?.dataset.status || 'all';
+  openDeleteConfirm({
+    title: 'Delete Appointment',
+    description: 'This <strong>permanently removes</strong> the booking from the schedule. This cannot be undone.',
+    endpoint: `/api/admin/appointments/${id}`,
+    reload: () => loadAppointments(active)
+  });
+}
+
+function deleteAssessment(id) {
+  const active = document.querySelector('#assess-filter-pills .filter-pill.active')?.dataset.status || 'all';
+  openDeleteConfirm({
+    title: 'Delete Assessment',
+    description: 'This <strong>permanently removes</strong> the submitted assessment and all of its responses. This cannot be undone.',
+    endpoint: `/api/admin/assessments/${id}`,
+    reload: () => loadAssessments(active)
+  });
+}
+
+function deleteMessage(id) {
+  openDeleteConfirm({
+    title: 'Delete Message',
+    description: 'This <strong>permanently removes</strong> the contact form message and any saved reply. This cannot be undone.',
+    endpoint: `/api/admin/messages/${id}`,
+    reload: loadMessages,
+    buttonLabel: 'Delete Message'
+  });
+}
+
 // ================= MESSAGES =================
 
 let contactMessagesCache = [];
@@ -818,10 +927,16 @@ async function loadMessages() {
           ? '<span style="color:#2F7A4D;font-size:.82rem;">' + (m.replied_by ? escapeHtml(m.replied_by) + ' · ' : '') + formatDate(m.replied_at) + '</span>'
           : '<span style="color:#B3452F;font-size:.82rem;">Not answered yet</span>'}</td>
         ${(window.dashboardAccess && window.dashboardAccess.canAct)
-          ? `<td><button class="btn btn-outline btn-sm" onclick="openReplyModal(${m.id})">${m.replied ? 'View / Reply' : 'Reply'}</button></td>`
+          ? `<td>
+              <button class="btn btn-outline btn-sm" onclick="openReplyModal(${m.id})">${m.replied ? 'View / Reply' : 'Reply'}</button>
+              <button class="btn btn-outline btn-sm danger-link" data-message-delete="${m.id}">Delete</button>
+            </td>`
           : '<td><span style="color:var(--ink-400);font-size:.82rem;">—</span></td>'}
       </tr>
     `).join('');
+    body.querySelectorAll('[data-message-delete]').forEach(btn => {
+      btn.addEventListener('click', () => deleteMessage(btn.dataset.messageDelete));
+    });
   } catch (err) {
     body.innerHTML = '<tr><td colspan="6">Could not load messages.</td></tr>';
   }
@@ -1010,14 +1125,19 @@ function gaitRowHtml(s) {
   `;
 }
 
-function handleGaitRowAction(action, id, btn) {
+async function handleGaitRowAction(action, id, btn) {
   if (action === 'report') { openGaitReport(id); return; }
   if (action === 'review') { openGaitReviewModal(id); return; }
   if (action === 'edit') { openGaitEditModal(id); return; }
   if (action === 'details') { openGaitDetailsModal(id); return; }
   if (action === 'delete') {
-    if (!window.confirm(`Delete gait session #${id} and its videos/artifacts? This cannot be undone.`)) return;
-    fetch(`/api/gait/sessions/${id}`, { method: 'DELETE' }).then(() => loadGait());
+    if (!window.confirm(`Delete gait session #${id}? It removes the videos, report and artifacts permanently. Press OK to delete, or Cancel to keep it.`)) return;
+    try {
+      const res = await fetch(`/api/gait/sessions/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not delete the session.');
+      loadGait();
+    } catch (err) { alert(err.message); }
   }
 }
 
@@ -1323,9 +1443,9 @@ function renderManagerPagination(elId, mgr, reload) {
   if (!el) return;
   if (mgr.totalPages <= 1) { el.innerHTML = ''; return; }
   el.innerHTML = `
-    <button class="btn btn-outline btn-sm" data-dir="-1" ${mgr.page <= 1 ? 'disabled' : ''}>â† Prev</button>
+    <button class="btn btn-outline btn-sm" data-dir="-1" ${mgr.page <= 1 ? 'disabled' : ''}>← Prev</button>
     <span class="page-info">Page ${mgr.page} of ${mgr.totalPages}</span>
-    <button class="btn btn-outline btn-sm" data-dir="1" ${mgr.page >= mgr.totalPages ? 'disabled' : ''}>Next â†’</button>
+    <button class="btn btn-outline btn-sm" data-dir="1" ${mgr.page >= mgr.totalPages ? 'disabled' : ''}>Next →</button>
   `;
   el.querySelectorAll('button[data-dir]').forEach(b => {
     if (b.disabled) return;
@@ -1343,9 +1463,9 @@ function blogRowHtml(p) {
       <td>${escapeHtml(p.category)}</td>
       <td>${escapeHtml(p.author)}</td>
       <td><span class="status-badge status-${p.status === 'published' ? 'confirmed' : 'pending'}">${p.status}</span></td>
-      <td>${p.publishedAt ? formatDate(p.publishedAt) : 'â€”'}</td>
+      <td>${p.publishedAt ? formatDate(p.publishedAt) : '—'}</td>
       <td style="white-space:nowrap;">
-        <button class="row-link" data-action="view" data-id="${p.id}" data-slug="${escapeHtml(p.slug)}">View â†’</button>
+        <button class="row-link" data-action="view" data-id="${p.id}" data-slug="${escapeHtml(p.slug)}">View →</button>
         <button class="row-link" data-action="edit" data-id="${p.id}" style="margin-left:10px;">Edit</button>
         <button class="row-link" data-action="delete" data-id="${p.id}" style="margin-left:10px; color:var(--danger);">Delete</button>
       </td>
@@ -1359,10 +1479,10 @@ function researchRowHtml(p) {
       <td>${escapeHtml(p.category)}</td>
       <td>${escapeHtml(p.author)}</td>
       <td><span class="status-badge status-${p.status === 'published' ? 'confirmed' : 'pending'}">${p.status}</span></td>
-      <td>${p.publishedAt ? formatDate(p.publishedAt) : 'â€”'}</td>
-      <td>${p.hasFile ? 'Attached' : 'â€”'}</td>
+      <td>${p.publishedAt ? formatDate(p.publishedAt) : '—'}</td>
+      <td>${p.hasFile ? 'Attached' : '—'}</td>
       <td style="white-space:nowrap;">
-        <button class="row-link" data-action="view" data-id="${p.id}" data-slug="${escapeHtml(p.slug)}">View â†’</button>
+        <button class="row-link" data-action="view" data-id="${p.id}" data-slug="${escapeHtml(p.slug)}">View →</button>
         <button class="row-link" data-action="edit" data-id="${p.id}" style="margin-left:10px;">Edit</button>
         <button class="row-link" data-action="delete" data-id="${p.id}" style="margin-left:10px; color:var(--danger);">Delete</button>
       </td>
@@ -1625,7 +1745,7 @@ function renderResearchEditor(paper, id) {
       <h4>PDF Attachment</h4>
       ${paper.hasFile && paper.fileName ? `
         <div class="file-attachment" id="re-file-box">
-          <span><strong>${escapeHtml(paper.fileName)}</strong> â€” attached</span>
+          <span><strong>${escapeHtml(paper.fileName)}</strong> — attached</span>
           ${id ? `<button class="btn btn-outline btn-sm" id="re-remove-file">Remove PDF</button>` : ''}
         </div>
       ` : ''}

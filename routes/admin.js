@@ -220,7 +220,7 @@ router.get('/patients', (req, res) => {
            COUNT(a.id) as appointment_count
     FROM users u
     LEFT JOIN appointments a ON a.user_id = u.id
-    WHERE u.role = 'patient'
+    WHERE u.role = 'patient' AND u.status != 'deleted'
     GROUP BY u.id
     ORDER BY u.created_at DESC
   `).all();
@@ -308,6 +308,23 @@ router.patch('/patients/:id/credentials', requireAdmin, (req, res) => {
   });
 });
 
+// ---- DELETE /api/admin/patients/:id  (soft delete — patient account hidden, records retained) ----
+// Patients are user accounts with role='patient'. Deleting here mirrors the
+// account soft-delete (users.status='deleted'), so the patient disappears from
+// the patient list and cannot log in, while records are kept for the audit trail.
+router.delete('/patients/:id', requireAdmin, (req, res) => {
+  const { confirm } = req.body || {};
+  if (!req.body || String(confirm ?? '').trim().toUpperCase() !== 'DELETE') {
+    return res.status(400).json({ error: 'Type DELETE to confirm this patient deletion.' });
+  }
+  const target = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'patient'").get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'Patient not found.' });
+
+  db.prepare("UPDATE users SET status = 'deleted' WHERE id = ?").run(target.id);
+  logAudit(req, 'delete_patient', 'user', target.id, `Soft-deleted patient account (${target.username})`);
+  res.json({ success: true, message: 'Patient hidden and their login disabled. Record retained (soft delete).' });
+});
+
 // ---- GET /api/admin/appointments ----
 // Optional query params: ?status=pending&from=YYYY-MM-DD&to=YYYY-MM-DD
 router.get('/appointments', (req, res) => {
@@ -340,6 +357,19 @@ router.patch('/appointments/:id', requireAdmin, (req, res) => {
   const result = db.prepare('UPDATE appointments SET status = ? WHERE id = ?').run(status, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Appointment not found.' });
   res.json({ success: true, message: 'Appointment updated.' });
+});
+
+// ---- DELETE /api/admin/appointments/:id  (permanently remove a booking) ----
+router.delete('/appointments/:id', requireAdmin, (req, res) => {
+  const { confirm } = req.body || {};
+  if (!req.body || String(confirm ?? '').trim().toUpperCase() !== 'DELETE') {
+    return res.status(400).json({ error: 'Type DELETE to confirm this appointment deletion.' });
+  }
+  const target = db.prepare('SELECT id, user_id FROM appointments WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'Appointment not found.' });
+  db.prepare('DELETE FROM appointments WHERE id = ?').run(target.id);
+  logAudit(req, 'appointment_delete', 'appointment', target.id, `Deleted appointment for user #${target.user_id}`);
+  res.json({ success: true, message: 'Appointment permanently deleted.' });
 });
 
 // ---- GET /api/admin/messages ----
@@ -399,6 +429,19 @@ router.post('/messages/:id/reply', requireAdmin, async (req, res) => {
     message: sendFlag ? 'Reply sent to the visitor.' : 'Reply saved and marked as replied.',
     messageId: info && info.messageId ? info.messageId : null
   });
+});
+
+// ---- DELETE /api/admin/messages/:id  (permanently remove a contact form message) ----
+router.delete('/messages/:id', requireAdmin, (req, res) => {
+  const { confirm } = req.body || {};
+  if (!req.body || String(confirm ?? '').trim().toUpperCase() !== 'DELETE') {
+    return res.status(400).json({ error: 'Type DELETE to confirm this message deletion.' });
+  }
+  const target = db.prepare('SELECT id, name FROM contact_messages WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'Message not found.' });
+  db.prepare('DELETE FROM contact_messages WHERE id = ?').run(target.id);
+  logAudit(req, 'contact_delete', 'contact_message', target.id, `Deleted contact message from ${target.name}`);
+  res.json({ success: true, message: 'Message permanently deleted.' });
 });
 
 // ---- GET /api/admin/assessments ----
@@ -484,6 +527,19 @@ router.patch('/assessments/:id', requireAdmin, (req, res) => {
   `).run(conclusion.trim(), reviewerName || 'Staff', req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Assessment not found.' });
   res.json({ success: true, message: 'Conclusion saved.' });
+});
+
+// ---- DELETE /api/admin/assessments/:id  (permanently remove a submitted assessment) ----
+router.delete('/assessments/:id', requireAdmin, (req, res) => {
+  const { confirm } = req.body || {};
+  if (!req.body || String(confirm ?? '').trim().toUpperCase() !== 'DELETE') {
+    return res.status(400).json({ error: 'Type DELETE to confirm this assessment deletion.' });
+  }
+  const target = db.prepare('SELECT id, user_id FROM assessments WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'Assessment not found.' });
+  db.prepare('DELETE FROM assessments WHERE id = ?').run(target.id);
+  logAudit(req, 'assessment_delete', 'assessment', target.id, `Deleted assessment for user #${target.user_id}`);
+  res.json({ success: true, message: 'Assessment permanently deleted.' });
 });
 
 // ==================== USER MANAGEMENT & AUDIT LOG ====================
@@ -949,7 +1005,7 @@ router.get('/export/xlsx', requireAdmin, async (req, res) => {
 
   // --- Summary sheet, created first so it's the first tab a reader sees ---
   const patientCountForSummary = db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'patient'").get().c;
-  const apptCountForSummary = db.prepare(`SELECT COUNT(*) c FROM appointments ${apptFilter.sql}`).get(...apptFilter.params).c;
+  const apptCountForSummary = db.prepare(`SELECT COUNT(*) c FROM appointments a ${apptFilter.sql}`).get(...apptFilter.params).c;
   const assessCountForSummary = db.prepare(`SELECT COUNT(*) c FROM assessments ${assessFilter.sql.replace(/s\.created_at/g, 'created_at')}`).get(...assessFilter.params).c;
 
   const summarySheet = workbook.addWorksheet('Summary');

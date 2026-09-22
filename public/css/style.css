@@ -839,6 +839,9 @@ table.admin-table tr:last-child td { border-bottom: none; }
 
 .row-link { color: var(--indigo-500); font-weight: 600; font-size: 0.82rem; cursor: pointer; background: none; border: none; padding: 0; }
 .row-link:hover { text-decoration: underline; }
+.row-link.danger-link { color: var(--danger); }
+.row-link.danger-link:hover { text-decoration: underline; }
+.btn-outline.btn-sm.danger-link { color: var(--danger); border-color: var(--danger); }
 
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(30, 30, 40, 0.55);

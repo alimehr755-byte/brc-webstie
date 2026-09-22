@@ -1,0 +1,30 @@
+Here's the updated prompt, with the verification script spec made long and descriptive instead of small:
+
+---
+
+**Prompt:**
+
+> I need to set up the SMPL-X model files for my gait-lab project at `brc-website/gait-lab`. The model requires manual registration on the official SMPL-X project website (non-commercial research license) — it can't be auto-downloaded by a script.
+>
+> Please do the following:
+>
+> 1. Create a `models/smplx/` folder inside `gait-lab` if it doesn't exist, with a `.gitignore` entry so the large model files never get committed to git.
+>
+> 2. Write a `SETUP_SMPLX.md` file inside `gait-lab` with clear step-by-step instructions for me, covering:
+>    - Going to the official SMPL-X project website and creating a free account
+>    - Reading and accepting the non-commercial license terms
+>    - Downloading the correct model files for SMPL-X (not SMPL or SMPL+H — I need the full body+face+hands version)
+>    - Which exact files/folders need to go inside `models/smplx/` (correct filenames like `SMPLX_NEUTRAL.npz`, folder layout expected by the `smplx` Python package)
+>
+> 3. Write a **long, descriptive** `check_smplx_setup.py` script — not a minimal one-liner check. It should:
+>    - Print a clear header explaining what it's about to check and why
+>    - Check for the existence of `models/smplx/` and every required file individually, one check at a time, printing a labeled ✅/❌ result for each (e.g. neutral model, male model, female model, any config files)
+>    - Verify each found file isn't empty/corrupted (basic file size sanity check, not just "exists")
+>    - Try to actually load the model using the `smplx` Python package and catch/report any loading errors with a human-readable explanation of what likely went wrong
+>    - Print a final summary section: total checks passed/failed, and if anything failed, a numbered list of exactly what to fix and how (e.g. "Missing SMPLX_FEMALE.npz — re-download from the SMPL-X website's Downloads section and place it in models/smplx/")
+>    - Include inline comments throughout explaining each check, so I can read the script itself and understand what's being validated and why, not just run it blindly
+>    - Exit with a non-zero status code if any check fails, so it can later be used as a startup validation gate
+>
+> 4. Add this check as an automatic startup validation in my main gait-lab script, so if I forget to add the files later, I get an immediate clear error instead of a confusing crash.
+>
+> Do not hardcode or guess a direct download URL for the model files — the site requires login, so just point me to "the official SMPL-X project website" in the instructions and I'll handle registration and downloading manually.

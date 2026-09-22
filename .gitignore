@@ -21,4 +21,9 @@ gait lab/gait_lab_promo_vertical.mp4
 python/__pycache__/
 !gait lab/pose_landmarker_full.task
 !gait lab/pose_landmarker_heavy.task
-!gait lab/pose_landmarker_light.task
+
+# ---- SMPL-X body models (manually downloaded — large, license-restricted) ----
+# Never commit the .npz body models. The folder itself is kept via .gitkeep so
+# the layout the check script / smplx package expects always exists.
+gait lab/models/smplx/
+!gait lab/models/smplx/.gitkeep

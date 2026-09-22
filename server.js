@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 // server.js
 // Entry point for the Bonsai Rehabilitation Center website.
 // Serves static frontend files + REST API for auth / appointments / contact.

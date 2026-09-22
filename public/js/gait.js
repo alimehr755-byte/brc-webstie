@@ -493,9 +493,13 @@ function bindSessionActions() {
         return;
       }
       if (action === 'delete') {
-        if (!window.confirm('Delete this session and its videos? This cannot be undone.')) return;
-        await fetch(`/api/gait/sessions/${id}`, { method: 'DELETE' });
-        loadSessions();
+        if (!window.confirm(`Delete this session? It removes the videos and generated report permanently. Press OK to delete, or Cancel to keep it.`)) return;
+        try {
+          const res = await fetch(`/api/gait/sessions/${id}`, { method: 'DELETE' });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Could not delete the session.');
+          loadSessions();
+        } catch (err) { alert(err.message); }
         return;
       }
       if (action === 'analyze') {
