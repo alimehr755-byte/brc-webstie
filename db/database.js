@@ -4,8 +4,23 @@
 
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
-const dbPath = path.join(__dirname, 'brc.db');
+// Resolve the SQLite database path. In production (Render) the persistent disk
+// is mounted at PERSIST_DIR (/data); fall back to the local brc.db for
+// development so `node server.js` works out of the box.
+const persistDir = process.env.PERSIST_DIR;
+const dbFileName = 'brc.db';
+const dbPath = persistDir
+  ? path.join(persistDir, dbFileName)
+  : path.join(__dirname, dbFileName);
+
+// Ensure the parent directory exists (Render volume mount may be empty on first deploy).
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
