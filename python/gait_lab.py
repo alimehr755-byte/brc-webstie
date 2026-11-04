@@ -1485,7 +1485,178 @@ RUNNING_PHASE_DEFS = [
 ]
 
 
-def build_phases(stance_pct, cycle_seconds, running=False):
+def _slope(series, i, window=3):
+    """Central-difference slope of a series at index i (deg per % cycle)."""
+    n = len(series)
+    if n < 3:
+        return 0.0
+    i0 = max(0, i - window)
+    i1 = min(n - 1, i + window)
+    if i1 <= i0:
+        return 0.0
+    return (series[i1] - series[i0]) / max(1, (i1 - i0))
+
+
+def _find_peak(series, lo, hi):
+    """Index of max value in series[lo:hi]; returns (idx, val) or (None, None)."""
+    n = len(series)
+    lo = max(0, lo); hi = min(n, hi)
+    if lo >= hi:
+        return None, None
+    seg = series[lo:hi]
+    if not any(v is not None for v in seg):
+        return None, None
+    best_idx = None; best_val = None
+    for j in range(lo, hi):
+        v = series[j]
+        if v is None:
+            continue
+        if best_val is None or v > best_val:
+            best_val = v; best_idx = j
+    return best_idx, best_val
+
+
+def _find_valley(series, lo, hi):
+    """Index of min value in series[lo:hi]; returns (idx, val) or (None, None)."""
+    n = len(series)
+    lo = max(0, lo); hi = min(n, hi)
+    if lo >= hi:
+        return None, None
+    seg = series[lo:hi]
+    if not any(v is not None for v in seg):
+        return None, None
+    best_idx = None; best_val = None
+    for j in range(lo, hi):
+        v = series[j]
+        if v is None:
+            continue
+        if best_val is None or v < best_val:
+            best_val = v; best_idx = j
+    return best_idx, best_val
+
+
+def detect_gait_events(timeseries, stance_pct):
+    """Detect gait events from sagittal-plane timeseries.
+
+    Reads timeseries.knee_flexion[L/R] and timeseries.ankle_angle[L/R]
+    (101 points, 0-100 % cycle) and returns a list of events:
+        heel_strike, foot_flat, heel_rise, toe_off, peak_swing_flexion
+    per side where the curve is measurable. Each event:
+        {name, side, cycle_pct, confidence, reason}
+    Zero-assumption: events with insufficient curve signal are omitted
+    (never fabricated).
+    """
+    events = []
+    ts = timeseries or {}
+    knee = ts.get("knee_flexion") or {}
+    ankle = ts.get("ankle_angle") or {}
+    cycle = ts.get("cycle_pct") or list(range(101))
+    n = len(cycle)
+
+    stance_end = max(1, min(n - 1, round((stance_pct or 60.0) / 100.0 * (n - 1))))
+
+    for side in ("L", "R"):
+        k = knee.get(side) if isinstance(knee, dict) else None
+        a = ankle.get(side) if isinstance(ankle, dict) else None
+        if not k or not a:
+            continue
+        k = [v for v in k]
+        a = [v for v in a]
+
+        # Heel strike: start of loading response (~0-5%). Detected by a rapid
+        # ankle transition from plantarflexion toward dorsiflexion combined with
+        # knee flexion onset. Confidence scales with curve magnitude.
+        hs_idx, hs_val = _find_valley(a, 0, max(5, n // 10))
+        if hs_idx is not None and hs_val is not None:
+            slope = _slope(a, hs_idx)
+            conf = min(95, max(40, abs(slope) * 20 + 40))
+            events.append({
+                "name": "heel_strike", "side": side,
+                "cycle_pct": round(cycle[hs_idx], 1),
+                "confidence": round(conf, 0),
+                "reason": "Ankle transitions from plantarflexion toward dorsiflexion; knee begins loading flexion.",
+            })
+
+        # Foot flat: ankle crosses neutral (~0 deg) during loading response.
+        ff_idx, ff_val = None, None
+        for j in range(max(1, hs_idx + 1 if hs_idx else 1), min(15, n)):
+            if a[j] is not None and abs(a[j]) <= 3.0:
+                ff_idx, ff_val = j, a[j]; break
+        if ff_idx is not None:
+            events.append({
+                "name": "foot_flat", "side": side,
+                "cycle_pct": round(cycle[ff_idx], 1),
+                "confidence": 70,
+                "reason": "Ankle reaches neutral dorsiflexion/plantarflexion; foot fully contacts ground.",
+            })
+
+        # Heel rise: end of terminal stance / start of pre-swing (~45-55%).
+        # Ankle begins sustained plantarflexion for push-off.
+        hr_search_lo = max(30, stance_end - 20)
+        hr_search_hi = min(stance_end + 5, n - 1)
+        hr_idx, hr_val = None, None
+        prev = None
+        for j in range(hr_search_lo, hr_search_hi + 1):
+            if a[j] is None:
+                continue
+            if prev is not None and a[j] > prev + 2.0:
+                hr_idx, hr_val = j, a[j]; break
+            prev = a[j]
+        if hr_idx is not None:
+            events.append({
+                "name": "heel_rise", "side": side,
+                "cycle_pct": round(cycle[hr_idx], 1),
+                "confidence": 65,
+                "reason": "Ankle enters sustained plantarflexion; heel lifts for push-off.",
+            })
+
+        # Toe off: end of pre-swing (~55-65%). Ankle max plantarflexion just
+        # before swing; knee begins to flex for limb advancement.
+        to_search_lo = max(stance_end, hr_idx + 1 if hr_idx else stance_end)
+        to_search_hi = min(70, n - 1)
+        to_idx, to_val = _find_peak(a, to_search_lo, to_search_hi)
+        if to_idx is not None and to_val is not None:
+            events.append({
+                "name": "toe_off", "side": side,
+                "cycle_pct": round(cycle[to_idx], 1),
+                "confidence": 70,
+                "reason": "Ankle reaches maximal plantarflexion; knee flexes to advance limb.",
+            })
+
+        # Peak swing flexion: max knee flexion during swing (~60-80%).
+        sw_lo = max(stance_end + 5, 60)
+        sw_hi = min(85, n - 1)
+        pf_idx, pf_val = _find_peak(k, sw_lo, sw_hi)
+        if pf_idx is not None and pf_val is not None:
+            events.append({
+                "name": "peak_swing_flexion", "side": side,
+                "cycle_pct": round(cycle[pf_idx], 1),
+                "confidence": 80,
+                "reason": f"Knee reaches maximum swing flexion ({pf_val:.0f} deg) for foot clearance.",
+            })
+
+    # Deduplicate + sort by cycle_pct.
+    seen = set(); uniq = []
+    for e in sorted(events, key=lambda x: (x["cycle_pct"], x["name"])):
+        key = (e["name"], e["side"], round(e["cycle_pct"]))
+        if key in seen:
+            continue
+        seen.add(key); uniq.append(e)
+    return uniq
+
+
+def build_phases(stance_pct, cycle_seconds, running=False, timeseries=None):
+    """Build the 7 gait sub-phases with event detection.
+
+    Phases (7, merged initial_contact into loading_response):
+        loading_response / mid_stance / terminal_stance / pre_swing /
+        initial_swing / mid_swing / terminal_swing.
+
+    If timeseries is supplied, gait events (heel_strike, foot_flat, heel_rise,
+    toe_off, peak_swing_flexion) are detected per side from the sagittal curves
+    and attached to the phase whose window contains them. Zero-assumption:
+    events are omitted when the curve signal is insufficient.
+    """
     defs = RUNNING_PHASE_DEFS if running else GA.PHASE_DEFS
     phases = []
     for code, name, typ, lo, hi, norm_pct in defs:
@@ -1503,7 +1674,23 @@ def build_phases(stance_pct, cycle_seconds, running=False):
             "pct_delta": round(pct - norm_pct, 2),
             "duration_ms": duration_ms,
             "classification": "normal", "severity": None, "flag": "none", "note": "",
+            "events": [],
         })
+
+    # Attach detected events to the phase window they fall in.
+    if timeseries and stance_pct:
+        events = detect_gait_events(timeseries, stance_pct)
+        for ev in events:
+            cpct = ev["cycle_pct"]
+            for ph in phases:
+                if ph["norm_pct_of_cycle"] - 5 <= cpct <= ph["norm_pct_of_cycle"] + 5:
+                    ph["events"].append({
+                        "name": ev["name"], "side": ev["side"],
+                        "cycle_pct": ev["cycle_pct"],
+                        "confidence": ev["confidence"],
+                        "reason": ev["reason"],
+                    })
+                    break
     return phases
 
 
@@ -1760,7 +1947,8 @@ def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs,
     swing_pct = round(100.0 - stance_pct, 1) if stance_pct is not None else None
     running = bool(cv_sagittal.get("running")) if sag_ok else False
 
-    phases = build_phases(stance_pct, cycle_seconds, running=running) if (sag_ok and stance_pct is not None and cycle_seconds) else []
+    phases = build_phases(stance_pct, cycle_seconds, running=running,
+                          timeseries=(cv_sagittal.get("timeseries") if sag_ok else None)) if (sag_ok and stance_pct is not None and cycle_seconds) else []
 
     # --- anomaly & archetype selection driven by measured frontal/sagittal values ---
     detected = []
@@ -1848,6 +2036,19 @@ def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs,
             detected.append(("deformity", f"Shoulder height asymmetry (normalized ~{sas:.2f} × pelvic width) — "
                              "upper-limb compensatory pattern during gait",
                              "shoulder", "mild"))
+        # Vaulting: aggressive plantarflexion push-off elevates standing limb for swing clearance.
+        if a_pf < -35.0:
+            detected.append(("deformity", f"Ankle prolonged plantarflexion ({a_pf:.0f}°) — vaulting (early heel-rise to clear swing limb)",
+                             "vaulting", "moderate"))
+        # Hip hiking: pronounced pelvic obliquity elevates swing-side pelvis for foot clearance.
+        if pel > 6.0:
+            detected.append(("deformity", f"Frontal pelvic obliquity ~{pel:.0f}° — hip hiking (swing-side pelvic elevation)",
+                             "hip_hiking", "moderate"))
+        # Circumduction: abnormally wide base indicates outward swing arc for foot clearance.
+        swm = fm.get("step_width_mean", 0)
+        if swm and swm > 0.35:
+            detected.append(("deformity", f"Wide step width (~{swm:.0f}% of cycle) — circumduction arc for foot clearance",
+                             "circumduction", "moderate"))
 
     # Map detected kinds to archetype muscle maps + prescriptions
     kinds = set()

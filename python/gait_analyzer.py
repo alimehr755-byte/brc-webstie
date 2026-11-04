@@ -44,8 +44,7 @@ ANALYZER = "brc-gait-analyzer"
 # Canonical phase model (percentage of the gait cycle each sub-phase occupies).
 # ---------------------------------------------------------------------------
 PHASE_DEFS = [
-    ("initial_contact", "Initial Contact / Heel Strike", "stance", 0, 2, 2),
-    ("loading_response", "Loading Response / Full Contact", "stance", 2, 10, 8),
+    ("loading_response", "Loading Response / Heel Strike to Full Contact", "stance", 0, 10, 10),
     ("mid_stance", "Mid Stance", "stance", 10, 30, 20),
     ("terminal_stance", "Terminal Stance", "stance", 30, 50, 20),
     ("pre_swing", "Pre-Swing", "stance", 50, 60, 10),
@@ -79,11 +78,6 @@ REFERENCE_PAPERS = [
 
 # Map one anomaly type per phase name (realistic clinical associations).
 ANOMALY_CATALOG = {
-    "initial_contact": (
-        ["prolonged", "Prolonged initial contact / forefoot-first landing suggests diminished "
-         "heel-strike ankle dorsiflexion control (equinus)".format()],
-        ["missing", "Absent heel strike (forefoot or flatfoot contact) consistent with absent "
-         "dorsiflexion at contact.".format()]),
     "loading_response": (
         ["prolonged", "Prolonged loading response with excessive knee flexion on weight acceptance.".format()],
         ["accelerated", "Abrupt weight transfer into mid-stance; reduced shock absorption.".format()]),
@@ -127,6 +121,10 @@ DEFORMITY_SAGITTAL = [
      "description": "Inadequate ankle dorsiflexion during swing reduces foot clearance and risks catching."},
     {"name": "Vaulting", "magnitude": "mild", "category": "functional",
      "description": "Early plantarflexion rise in terminal stance to clear the limb, shortening effective leg."},
+    {"name": "Hip hiking", "magnitude": "mild", "category": "functional",
+     "description": "Pelvic elevation on the swing side to gain foot clearance; pelvic asymmetry."},
+    {"name": "Circumduction", "magnitude": "moderate", "category": "functional",
+     "description": "Leg swung outward in a wide arc during swing for foot clearance; reduced stride length."},
     {"name": "Stiff-knee gait", "magnitude": "moderate", "category": "functional",
      "description": "Reduced peak knee flexion in swing from spasticity or insufficient momentum."},
     {"name": "Excessive anterior pelvic tilt", "magnitude": "mild", "category": "functional",
@@ -154,7 +152,7 @@ ROM_DEFS = [
 ]
 
 ARCHETYPES = [
-    {"label": "equinus", "anomalies": ["initial_contact:prolonged", "terminal_stance:accelerated", "pre_swing:accelerated"],
+    {"label": "equinus", "anomalies": ["loading_response:prolonged", "terminal_stance:accelerated", "pre_swing:accelerated"],
      "deformity": ["Drop foot / foot drop during swing", "Vaulting"],
      "overactive": [("Gastrocnemius / Soleus", "Primary plantarflexors; overactivity shortens the heel-rock in terminal stance")],
      "weak": [("Tibialis anterior", "Dorsiflexion during swing and eccentric control at contact")],
@@ -230,6 +228,51 @@ ARCHETYPES = [
      "orthotics": [],
      "prosthetics": [{"component": "Prosthetic knee mechanism (for transfemoral users) -- essential multi-axis knee",
                       "reason": "Regulated swing flexion improves clearance and stride symmetry"}]},
+    {"label": "vaulting", "anomalies": ["terminal_stance:accelerated", "pre_swing:accelerated", "initial_swing:accelerated"],
+     "deformity": ["Vaulting (plantarflexion of standing limb to elevate body for swing clearance)", "Hip-hike on swing side"],
+     "overactive": [("Gastrocnemius / Soleus", "Primary plantarflexors; early heel rise elevates standing limb"),
+                    ("Iliopsoas", "Hip flexors lift swing limb high")],
+     "weak": [("Tibialis anterior", "Dorsiflexor weakness reduces swing clearance without vaulting"),
+              ("Gluteus medius / minimus", "Hip abductor weakness contributes to compensatory elevation")],
+     "exercises": [
+         {"name": "Standing calf stretch", "frequency": "2 min daily, 3 sets", "sets": 3, "reps": None, "hold_seconds": 60, "rest_seconds": 30,
+          "reason": "Reduces plantarflexor overactivity that drives early heel rise"},
+         {"name": "Tibialis anterior strengthening", "frequency": "15 reps, 2 sets daily", "sets": 2, "reps": 15, "hold_seconds": None, "rest_seconds": 45,
+          "reason": "Improves dorsiflexion so vaulting is not needed for clearance"},
+         {"name": "Hip-hike practice with mirror feedback", "frequency": "10 reps each side, daily", "sets": 1, "reps": 10, "hold_seconds": None, "rest_seconds": 60,
+          "reason": "Teaches controlled hip elevation vs. compensatory vaulting"}],
+     "orthotics": [{"component": "Posterior leaf spring AFO", "reason": "Assists dorsiflexion so standing limb need not vault"}],
+     "prosthetics": []},
+    {"label": "hip_hiking", "anomalies": ["initial_swing:prolonged", "mid_swing:prolonged"],
+     "deformity": ["Hip hiking (pelvic elevation on swing side to clear foot)", "Trendelenburg-like pelvic asymmetry"],
+     "overactive": [("Quadratus lumborum", "Elevates pelvis on swing side"),
+                    ("Tensor fasciae latae", "Hip abductor compensation")],
+     "weak": [("Gluteus medius / minimus", "Hip abductor weakness lets pelvis drop"),
+              ("Iliopsoas", "Hip flexor weakness limits forward limb advancement")],
+     "exercises": [
+         {"name": "Side-lying hip abduction", "frequency": "12 reps, 3 sets daily", "sets": 3, "reps": 12, "hold_seconds": None, "rest_seconds": 45,
+          "reason": "Strengthens stance-side abductors so pelvis stays level"},
+         {"name": "Standing hip flexion with level pelvis", "frequency": "12 reps each side, 2 sets", "sets": 2, "reps": 12, "hold_seconds": None, "rest_seconds": 45,
+          "reason": "Trains hip flexors without pelvic elevation"},
+         {"name": "Single-leg balance on step", "frequency": "20-30 sec, 3 reps daily", "sets": 1, "reps": 3, "hold_seconds": 25, "rest_seconds": 60,
+          "reason": "Challenges abductor control in weight-bearing"}],
+     "orthotics": [{"component": "Posterior leaf spring AFO", "reason": "Improves foot clearance reducing need to hike"}],
+     "prosthetics": []},
+    {"label": "circumduction", "anomalies": ["mid_swing:prolonged", "terminal_swing:prolonged"],
+     "deformity": ["Circumduction (leg swung outward in a wide arc for foot clearance)", "Reduced stride length on affected side"],
+     "overactive": [("Tensor fasciae latae", "Abducts/externally rotates hip to swing leg outward"),
+                    ("Gluteus medius", "Overactive to lift hip during circumduction arc")],
+     "weak": [("Tibialis anterior", "Dorsiflexor weakness reduces toe clearance, triggering circumduction"),
+              ("Iliopsoas", "Hip flexor weakness limits forward swing, encouraging outward arc")],
+     "exercises": [
+         {"name": "Seated ankle dorsiflexion with resistance band", "frequency": "15 reps, 2 sets daily", "sets": 2, "reps": 15, "hold_seconds": None, "rest_seconds": 45,
+          "reason": "Strengthens dorsiflexors so circumduction is not needed for clearance"},
+         {"name": "Straight-leg marching forward", "frequency": "2 min, 3 sets daily", "sets": 3, "reps": None, "hold_seconds": None, "rest_seconds": 30,
+          "reason": "Trains forward (sagittal) swing instead of outward arc"},
+         {"name": "Tibialis anterior raises", "frequency": "15 reps, 2 sets daily", "sets": 2, "reps": 15, "hold_seconds": None, "rest_seconds": 45,
+          "reason": "Improves toe clearance during swing"}],
+     "orthotics": [{"component": "Posterior leaf spring AFO", "reason": "Assists dorsiflexion, reducing circumduction need"}],
+     "prosthetics": []},
 ]
 
 # ---- point 3 completion: multi-planar biomechanical muscle map ----
@@ -351,6 +394,54 @@ ANOMALY_MUSCLE_LINKS = {
             "compensation": "Circumduction, hip-hike and lateral trunk bending to clear the stiff limb.",
         },
     ],
+    "vaulting": [
+        {
+            "anomaly": "Vaulting (plantarflexion of standing limb to elevate body for swing clearance)",
+            "deformities": ["Vaulting"],
+            "muscles": [
+                {"name": "Gastrocnemius / Soleus", "status": "overactive",
+                 "role": "Primary plantarflexors",
+                 "implication": "Early heel rise shortens the effective limb to clear the ground."},
+                {"name": "Tibialis anterior", "status": "weak",
+                 "role": "Decelerates footfall at contact",
+                 "implication": "Poor eccentric control lets the foot slap and shortens loading response."},
+            ],
+            "localized_damage": "Forefoot and plantar fascia overload from repeated early heel rise.",
+            "compensation": "Elevated contralateral swing as the standing limb vaults.",
+        },
+    ],
+    "hip_hiking": [
+        {
+            "anomaly": "Hip hiking (pelvic elevation on swing side to clear foot)",
+            "deformities": ["Hip hiking"],
+            "muscles": [
+                {"name": "Quadratus lumborum", "status": "overactive",
+                 "role": "Elevates pelvis on swing side",
+                 "implication": "Hikes the pelvis to gain foot clearance without adequate knee/ankle flexion."},
+                {"name": "Gluteus medius / minimus", "status": "weak",
+                 "role": "Hip abduction and pelvic stabilization",
+                 "implication": "Weak abductors let the stance-side pelvis drop, triggering swing-side elevation."},
+            ],
+            "localized_damage": "Lumbar facet / disc stress from repeated lateral trunk side-bending.",
+            "compensation": "Broadened base of support and circumduction on the sound side.",
+        },
+    ],
+    "circumduction": [
+        {
+            "anomaly": "Circumduction (leg swung outward in a wide arc for foot clearance)",
+            "deformities": ["Circumduction"],
+            "muscles": [
+                {"name": "Tensor fasciae latae", "status": "overactive",
+                 "role": "Hip abduction / external rotation",
+                 "implication": "Swings the leg outward in a wide arc instead of forward."},
+                {"name": "Tibialis anterior", "status": "weak",
+                 "role": "Ankle dorsiflexion during swing",
+                 "implication": "Reduced toe clearance forces the circumduction arc."},
+            ],
+            "localized_damage": "Hip abductor overuse and lateral knee stress from the outward swing arc.",
+            "compensation": "Lateral trunk lean to reduce abductor moment arm during the circumduction arc.",
+        },
+    ],
 }
 
 # Structural / biomechanical weaknesses implicated by the detected pattern.
@@ -391,6 +482,30 @@ STRUCTURAL_WEAKNESSES = {
         {"structure": "Rectus femoris muscle-tendon complex", "category": "functional",
          "related_deformity": "Reduced peak knee flexion in swing",
          "note": "Sustained rectus overactivity during swing can promote myotendinous strain."},
+    ],
+    "vaulting": [
+        {"structure": "Ankle plantarflexors (gastrocnemius / soleus)", "category": "functional",
+         "related_deformity": "Vaulting",
+         "note": "Overactive plantarflexors cause early heel-rise, shortening the effective standing limb."},
+        {"structure": "Forefoot / metatarsal heads", "category": "structural",
+         "related_deformity": "Forefoot overload under vaulting",
+         "note": "Repeated push-off on the forefoot concentrates load under the metatarsal heads."},
+    ],
+    "hip_hiking": [
+        {"structure": "Quadratus lumborum / ipsilateral trunk", "category": "functional",
+         "related_deformity": "Hip hiking",
+         "note": "Overactive quadratus lumborum elevates the pelvis on the swing side to clear the foot."},
+        {"structure": "Hip abductor mechanism", "category": "functional",
+         "related_deformity": "Pelvic asymmetry",
+         "note": "Weak stance-side abductors let the pelvis drop, prompting swing-side elevation."},
+    ],
+    "circumduction": [
+        {"structure": "Hip abductor / external rotator chain", "category": "functional",
+         "related_deformity": "Circumduction",
+         "note": "Overactive TFL / gluteus medius swings the leg outward for foot clearance."},
+        {"structure": "Ankle dorsiflexors (tibialis anterior)", "category": "functional",
+         "related_deformity": "Reduced swing-foot clearance",
+         "note": "Weak dorsiflexors drop the foot, triggering the outward circumduction arc."},
     ],
 }
 
@@ -634,6 +749,69 @@ PREDICTION_TABLE = {
             {"pathology": "Secondary lower-extremity muscle imbalances",
              "likelihood": "medium", "timeline": "1-3 years",
              "mechanism": "Repeated overuse of hip flexors and hamstrings around a stiff knee."},
+        ],
+    },
+    "vaulting": {
+        "joint_degeneration_risk": [
+            {"joint": "Ankle (tibiotalar) & forefoot", "risk_level": "moderately elevated",
+             "horizon": "3-7 years",
+             "mechanism": "Repeated early heel-rise concentrates load under the metatarsal heads and plantarflexes the ankle, "
+                          "promoting forefoot overload and Achilles/soleus shortening.",
+             "indicators": ["early heel-rise", "prolonged plantarflexion", "forefoot contact"]},
+            {"joint": "Contralateral hip / knee", "risk_level": "moderate",
+             "horizon": "4-8 years",
+             "mechanism": "Vaulting shortens the affected limb's effective length, shifting impact to the sound side.",
+             "indicators": ["asymmetric stride duration", "vaulting pattern"]},
+        ],
+        "compensatory_pathologies": [
+            {"pathology": "Ipsilateral hip-hike with lateral trunk lean", "likelihood": "high",
+             "timeline": "6 months - 2 years",
+             "mechanism": "The vaulting limb elevates the pelvis instead of flexing knee/ankle in swing."},
+            {"pathology": "Forefoot metatarsalgia", "likelihood": "medium", "timeline": "1-3 years",
+             "mechanism": "Forefoot contact concentrates ground reaction under the metatarsal heads."},
+            {"pathology": "Achilles / plantarflexor contracture", "likelihood": "high", "timeline": "1-4 years",
+             "mechanism": "Prolonged plantarflexion promotes adaptive soft-tissue shortening."},
+        ],
+    },
+    "hip_hiking": {
+        "joint_degeneration_risk": [
+            {"joint": "Ipsilateral hip / lumbar spine", "risk_level": "elevated",
+             "horizon": "3-8 years",
+             "mechanism": "Repeated pelvic elevation on the swing side loads the ipsilateral quadratus lumborum "
+                          "and lateral lumbar facet joints.",
+             "indicators": ["frontal pelvic obliquity", "lateral trunk lean", "pelvic elevation in swing"]},
+            {"joint": "Contralateral hip", "risk_level": "moderate",
+             "horizon": "4-8 years",
+             "mechanism": "Weight acceptance shifts to the sound side under pelvic obliquity.",
+             "indicators": ["step-width asymmetry", "asymmetric coronal load"]},
+        ],
+        "compensatory_pathologies": [
+            {"pathology": "Progressive lateral trunk lean / functional scoliosis", "likelihood": "high",
+             "timeline": "1-3 years",
+             "mechanism": "Trunk is repeatedly displaced over the stance limb to reduce abductor demand."},
+            {"pathology": "Contralateral hip abductor overload", "likelihood": "medium",
+             "timeline": "2-5 years",
+             "mechanism": "The sound side stabilizes the pelvis under a shifted centre of mass."},
+        ],
+    },
+    "circumduction": {
+        "joint_degeneration_risk": [
+            {"joint": "Hip (abductor / external rotator)", "risk_level": "moderately elevated",
+             "horizon": "3-8 years",
+             "mechanism": "Repeated outward swing arc overuses the hip abductors and external rotators.",
+             "indicators": ["wide step width", "circumduction arc", "reduced stride length"]},
+            {"joint": "Lumbar spine", "risk_level": "moderate",
+             "horizon": "3-8 years",
+             "mechanism": "Lateral trunk bending to facilitate circumduction loads the lumbar spine recurrently.",
+             "indicators": ["trunk lean", "reduced swing clearance"]},
+        ],
+        "compensatory_pathologies": [
+            {"pathology": "Hip abductor strain / greater trochanteric pain", "likelihood": "high",
+             "timeline": "1-3 years",
+             "mechanism": "Sustained abductor activation during the circumduction arc."},
+            {"pathology": "Increased falls risk from impaired clearance", "likelihood": "medium",
+             "timeline": "immediate - ongoing",
+             "mechanism": "Wide arc reduces stability and toe clearance late in swing."},
         ],
     },
     "valgus": {

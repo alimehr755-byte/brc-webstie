@@ -920,6 +920,8 @@ router.get('/sessions/:id/progression', requireAuth, (req, res) => {
     const romL = sag && sag.rom ? sag.rom.L || {} : {};
     const romR = sag && sag.rom ? sag.rom.R || {} : {};
     const c3sym = rs.cv3d && rs.cv3d.symmetry ? rs.cv3d.symmetry : {};
+    const cp = rs.cp_knee || {};
+    const sides = cp.sides || {};
     return {
       id: r2.id,
       created_at: r2.created_at,
@@ -936,11 +938,41 @@ router.get('/sessions/:id/progression', requireAuth, (req, res) => {
       hip_max_L: romL.hip_peak != null ? romL.hip_peak : null,
       hip_max_R: romR.hip_peak != null ? romR.hip_peak : null,
       cv3d_knee_si: c3sym.knee_flex_si != null ? c3sym.knee_flex_si : null,
+      cp_pattern_L: sides.L && sides.L.pattern ? sides.L.pattern : null,
+      cp_pattern_R: sides.R && sides.R.pattern ? sides.R.pattern : null,
+      cp_confidence: typeof cp.confidence === 'number' ? cp.confidence : null,
     };
   });
 
-  res.json({ session_id: row.id, points });
+  // Identify baseline = earliest analyzed session; compute per-metric deltas vs baseline.
+  const baseline = points.length ? points[0] : null;
+  const METRIC_KEYS = [
+    'stance_pct', 'swing_pct', 'cadence', 'cycle_seconds', 'stride_symmetry',
+    'knee_flex_si', 'coronal_load_symmetry', 'knee_max_L', 'knee_max_R',
+    'hip_max_L', 'hip_max_R', 'cv3d_knee_si', 'cp_confidence',
+  ];
+  const enriched = points.map(p => {
+    const entry = { ...p, is_baseline: baseline && p.id === baseline.id, delta: {} };
+    if (baseline && p.id !== baseline.id) {
+      METRIC_KEYS.forEach(k => {
+        const cur = p[k]; const base = baseline[k];
+        if (typeof cur === 'number' && typeof base === 'number' && base !== 0) {
+          entry.delta[k] = round2(cur - base);
+          entry.delta[k + '_pct'] = round2(((cur - base) / Math.abs(base)) * 100);
+        } else if (cur !== base) {
+          entry.delta[k] = cur === null || base === null ? null : String(cur) + ' → ' + String(base);
+        }
+      });
+    }
+    return entry;
+  });
+
+  res.json({ session_id: row.id, baseline: baseline ? { id: baseline.id, created_at: baseline.created_at } : null, points: enriched });
 });
+
+function round2(v) {
+  return Math.round(v * 100) / 100;
+}
 
 // Preview a stored walk video (owner or staff).
 router.get('/sessions/:id/video/:plane', requireAuth, (req, res) => {

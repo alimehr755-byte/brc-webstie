@@ -84,7 +84,7 @@ def classify_side(curve: Optional[List[float]], stance_pct: Optional[float]) -> 
                             "version": VERSION}
 
     if not curve or len(curve) < 51 or stance_pct is None or not (0.0 < stance_pct < 100.0):
-        out = dict(base, status="unassessed", pattern=None,
+        out = dict(base, status="unassessed", pattern=None, confidence=0,
                    reason=("No measured knee-flexion curve (or stance-phase boundary) from a "
                            "validated sagittal capture — per spec P1 the pattern is withheld, "
                            "never inferred."))
@@ -133,23 +133,32 @@ def classify_side(curve: Optional[List[float]], stance_pct: Optional[float]) -> 
 
     reasons: List[str] = []
     pattern: Optional[str] = None
+    confidence = 0  # 0-100 % confidence that the pattern is genuinely present
 
     if stance_min < RECURVATUM_STANCE_MIN:
         pattern = "recurvatum"
         reasons.append(
             f"Knee extends beyond neutral in stance (min {stance_min:.1f}° < "
             f"{RECURVATUM_STANCE_MIN}° hyperextension threshold).")
+        # Confidence rises with depth of hyperextension beyond threshold.
+        confidence = min(95, 55 + (RECURVATUM_STANCE_MIN - stance_min) * 8)
     elif mid_min > CROUCH_STANCE_MIN:
         pattern = "crouch"
         reasons.append(
             f"Knee flexion never reduces below {mid_min:.1f}° through single support "
             f"(crouch threshold {CROUCH_STANCE_MIN}°).")
+        # Confidence rises with how far the stance minimum stays above threshold.
+        confidence = min(95, 55 + (mid_min - CROUCH_STANCE_MIN) * 3)
     elif first_peak >= JUMP_FIRST_PEAK_MIN and JUMP_STANCE_MIN_LO <= mid_min <= JUMP_STANCE_MIN_HI:
         pattern = "jump"
         reasons.append(
             f"Premature peak flexion {first_peak:.1f}° at {first_peak_pct:.0f}% cycle with a "
             f"single-support minimum held at {mid_min:.1f}° ({JUMP_STANCE_MIN_LO}-{JUMP_STANCE_MIN_HI}° "
             f"jump window).")
+        # Confidence rises with peak excess over 30° and how central the min is in the window.
+        peak_margin = max(0.0, first_peak - JUMP_FIRST_PEAK_MIN)
+        min_margin = min(mid_min - JUMP_STANCE_MIN_LO, JUMP_STANCE_MIN_HI - mid_min)
+        confidence = min(90, 55 + peak_margin * 2 + min_margin * 2)
     elif swing_peak < STIFF_SWING_PEAK_MAX or (swing_peak < STIFF_SWING_TIMING_COMBO_MAX and
                                                swing_peak_pct > STIFF_SWING_PEAK_TIMING):
         pattern = "stiff"
@@ -157,12 +166,28 @@ def classify_side(curve: Optional[List[float]], stance_pct: Optional[float]) -> 
             f"Swing-phase peak flexion {swing_peak:.1f}° at {swing_peak_pct:.0f}% cycle "
             f"(stiff-knee screen: <{STIFF_SWING_PEAK_MAX}° amplitude, or <"
             f"{STIFF_SWING_TIMING_COMBO_MAX}° with peak delayed past {STIFF_SWING_PEAK_TIMING}% cycle).")
+        # Confidence rises with how far swing peak falls below 45°.
+        confidence = min(90, 55 + max(0.0, STIFF_SWING_PEAK_MAX - swing_peak) * 2)
 
     if pattern is None:
+        # not_classified: confidence reflects how far the curve is from meeting
+        # any threshold (higher = clearly normal, lower = borderline).
+        margins = []
+        if stance_min is not None:
+            margins.append(max(0.0, CROUCH_STANCE_MIN - stance_min))  # far above 30 -> normal
+        if first_peak is not None:
+            margins.append(max(0.0, JUMP_FIRST_PEAK_MIN - first_peak))  # far below 30 -> normal
+        if swing_peak is not None:
+            margins.append(max(0.0, swing_peak - STIFF_SWING_PEAK_MAX))  # far above 45 -> normal
+        if margins:
+            confidence = min(85, 40 + min(margins) * 2)
+        else:
+            confidence = 40
         out = dict(base,
                    status="assessed",
                    pattern="not_classified",
                    pattern_label=PATTERN_LABELS["not_classified"],
+                   confidence=confidence,
                    features=features,
                    reason=("Measured knee curve does not meet any Sutherland-Davids walk-frame "
                            "threshold (recurvatum < -5°, stance min > 30°, jump window "
@@ -174,6 +199,7 @@ def classify_side(curve: Optional[List[float]], stance_pct: Optional[float]) -> 
                 status="assessed",
                 pattern=pattern,
                 pattern_label=PATTERN_LABELS[pattern],
+                confidence=confidence,
                 features=features,
                 reason="; ".join(reasons) or None)
 
@@ -200,15 +226,19 @@ def classify_cp_knee(cv_sagittal: Dict[str, Any]) -> Dict[str, Any]:
             "version": VERSION,
             "citations": CITATIONS,
             "sides": sides,
+            "confidence": 0,
             "reason": ("No usable knee-flexion trajectory was measured (a validated sagittal "
                        "capture is required). Pattern screening withheld per zero-assumption "
                        "protocol."),
         }
+    confidences = [sides[s].get("confidence", 0) for s in sides if sides[s].get("status") == "assessed"]
+    overall_confidence = round(sum(confidences) / len(confidences), 0) if confidences else 0
     return {
         "status": "assessed",
         "version": VERSION,
         "citations": CITATIONS,
         "sides": sides,
+        "confidence": overall_confidence,
         "reason": None,
     }
 

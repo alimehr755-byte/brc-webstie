@@ -1524,12 +1524,37 @@ async function loadProgression(s) {
   try {
     const res = await fetchWithTimeout(`/api/gait/sessions/${s.id}/progression`, {}, 30000);
     if (!res.ok) throw new Error();
-    const { points } = await res.json();
+    const { points, baseline } = await res.json();
     _progressionCache[s.id] = points || [];
     if (!points || points.length < 2) {
       body.innerHTML = '<p class="empty-state">At least two analyzed sessions are needed to chart progress over time.</p>';
       return;
     }
+    const latest = points[points.length - 1];
+    const base = baseline || points[0];
+    // Delta summary table: latest vs baseline.
+    const deltaRows = [];
+    const deltaDefs = [
+      ['knee_max_L', 'Peak knee flexion L', 'deg'], ['knee_max_R', 'Peak knee flexion R', 'deg'],
+      ['hip_max_L', 'Peak hip flexion L', 'deg'], ['hip_max_R', 'Peak hip flexion R', 'deg'],
+      ['stance_pct', 'Stance share', '% of cycle'], ['cadence', 'Cadence', 'cycles/sec'],
+      ['stride_symmetry', 'Stride symmetry', '%'], ['knee_flex_si', 'Knee flexion SI', '%'],
+      ['cv3d_knee_si', 'CV3D knee SI', '%'], ['cp_confidence', 'Pattern confidence', '%'],
+    ];
+    deltaDefs.forEach(([key, label, unit]) => {
+      const cur = latest[key]; const b = base[key];
+      if (cur == null && b == null) return;
+      const d = (cur != null && b != null) ? (cur - b) : null;
+      const dp = (d != null && b !== 0) ? ((d / Math.abs(b)) * 100).toFixed(1) : null;
+      deltaRows.push(`
+        <tr>
+          <td>${escapeHtml(label)}</td>
+          <td style="text-align:center;">${b != null ? b.toFixed(1) : '—'}</td>
+          <td style="text-align:center;">${cur != null ? cur.toFixed(1) : '—'}</td>
+          <td style="text-align:center;">${d != null ? (d >= 0 ? '+' : '') + d.toFixed(1) : '—'}</td>
+          <td style="text-align:center;">${dp != null ? (dp >= 0 ? '+' : '') + dp + '%' : '—'}</td>
+        </tr>`);
+    });
     document.querySelectorAll('#gait-progression-body canvas[data-gait-chart]').forEach(cd => {
       try { const ch = Chart.getChart(cd); if (ch) ch.destroy(); } catch (e) { /* ignore */ }
       delete cd.dataset._built;
@@ -1562,7 +1587,22 @@ async function loadProgression(s) {
     if (points.some(p => p.stride_symmetry != null)) symDs.push(progLine('Stride symmetry', '#2E8540', points.map(p => p.stride_symmetry)));
     if (points.some(p => p.knee_flex_si != null)) symDs.push(progLine('Knee flexion SI', '#C99436', points.map(p => p.knee_flex_si)));
     if (symDs.length) addChart('gait-prog-sym', 'Symmetry indices', '%', symDs);
-    body.innerHTML = `<div class="prog-grid">${items.join('')}</div>`;
+    const latestPat = latest.cp_pattern_L && latest.cp_pattern_R
+      ? `L: ${escapeHtml(latest.cp_pattern_L)} · R: ${escapeHtml(latest.cp_pattern_R)}`
+      : '—';
+    body.innerHTML = `
+      <p style="font-size:.82rem; color:var(--ink-600); margin-bottom:10px;">
+        Baseline: <strong>Session #${base.id}</strong> (${formatShortDate(base.created_at)}) &nbsp;·&nbsp;
+        Latest: <strong>Session #${latest.id}</strong> (${formatShortDate(latest.created_at)}) &nbsp;·&nbsp;
+        Latest CP pattern: ${latestPat}
+      </p>
+      <div style="overflow-x:auto; margin-bottom:14px;">
+        <table class="admin-table">
+          <thead><tr><th>Metric</th><th>Baseline</th><th>Latest</th><th>Δ abs</th><th>Δ %</th></tr></thead>
+          <tbody>${deltaRows.join('')}</tbody>
+        </table>
+      </div>
+      <div class="prog-grid">${items.join('')}</div>`;
     setTimeout(() => buildPanelCharts('gait-progression-body'), 0);
   } catch (e) {
     body.innerHTML = '<p class="empty-state">Could not load progression data.</p>';
