@@ -1,0 +1,13 @@
+session_id,patient_id,age_years,gender,diagnosis,gmfcS_level,golden,true/false,
+capture_date,captured_by,
+knee_flex_stance_L_deg,knee_flex_stance_R_deg,
+knee_flex_swing_L_deg,knee_flex_swing_R_deg,
+hip_flex_stance_L_deg,hip_flex_stance_R_deg,
+hip_flex_swing_L_deg,hip_flex_swing_R_deg,
+ankle_dfx_stance_L_deg,ankle_dfx_stance_R_deg,
+cp_knee_pattern,pelvic_obliquity,trendelenburg,
+bbs_total,bbs_mobility_band,tug_seconds,gmfcS_level_physio,
+engine_knee_flex_stance_L_deg,engine_knee_flex_stance_R_deg,
+engine_knee_flex_swing_L_deg,engine_knee_flex_swing_R_deg,
+engine_cp_knee_pattern_L,engine_cp_knee_pattern_R,
+concordance_pass,mae_knee_stance_deg,mae_knee_swing_deg,notes
