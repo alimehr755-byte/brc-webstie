@@ -1682,7 +1682,7 @@ def _build_beginner_summary(result, anthropometry_block=None):
     }
 
 
-def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs, out_dir, anthropometry_block=None):
+def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs, out_dir, anthropometry_block=None, age_years=None):
     """
     Turn measured CV kinematics into the full clinical result object.
     Falls back gracefully when pose data is unavailable (reuses deterministic tables).
@@ -1714,6 +1714,33 @@ def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs,
     detected = []
     overactive = []
     weak = []
+
+    # Phase D — pediatric & CP screening: run the measured-based Sutherland-Davids
+    # knee-pattern classifier on the validated sagittal capture (zero-assumption:
+    # it reports status 'unassessed' with a reason rather than guessing). Any
+    # classified pattern feeds the anomaly stream so muscles / archetype /
+    # prescriptions stay coherent with the knee screen.
+    cp_knee_block = None
+    if cv_sagittal.get("status") == "ok":
+        try:
+            import cp_knee_classifier as CPK
+            cp_knee_block = CPK.classify_cp_knee(cv_sagittal)
+        except Exception as exc:  # network/Deps issues must NEVER fail the report
+            cp_knee_block = {"status": "unassessed", "version": "cp-knee-error",
+                             "citations": None, "sides": {},
+                             "reason": "Classifier unavailable: {}".format(exc)}
+        if cp_knee_block and cp_knee_block.get("status") == "assessed":
+            rom = cv_sagittal.get("rom", {})
+            for s, sname in (("L", "Left"), ("R", "Right")):
+                side = (cp_knee_block.get("sides") or {}).get(s) or {}
+                pat = side.get("pattern")
+                if pat and pat != "not_classified" and side.get("reason"):
+                    detected.append(("anomaly",
+                                     "{} knee — {} ({}): {}".format(
+                                         sname, side.get("pattern_label", pat), s, side["reason"]),
+                                     "crouch" if pat in ("jump", "crouch") else
+                                     ("stiff-knee" if pat == "stiff" else "stiff-knee"),
+                                     "moderate"))
 
     # sagittal knee / ankle cues
     if cv_sagittal.get("status") == "ok":
@@ -1941,6 +1968,26 @@ def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs,
     diag = "Engine: BRC Biomechanical Engine (real computer-vision gait analysis). " + \
            "Measured planes — sagittal: {}; frontal: {}.".format(plane_notes.get("sagittal", "n/a"), plane_notes.get("frontal", "n/a"))
 
+    # Phase D — age-banded stance-phase reference band. Pediatric stride maturing
+    # (Sutherland 1988 mature-gait literature): toddlers walk with a reduced
+    # stance percentage that converges on the adult 58-62% band by ~7 years.
+    # GOS-ICH normative dataset (Alderson 2023, n=624) informs the preschool
+    # bands. The adult band is used when age is absent (zero-assumption: the
+    # report does NOT guess maturity, it only states which band applied).
+    if age_years is not None and age_years < 2.0:
+        stance_band, norm_source = [42.0, 55.0], "Pediatric toddler band (Sutherland 1988 mature-gait literature)"
+    elif age_years is not None and age_years < 3.5:
+        stance_band, norm_source = [50.0, 60.0], "Preschool band (GOS-ICH normative dataset, Alderson 2023, n=624)"
+    elif age_years is not None and age_years < 7.0:
+        stance_band, norm_source = [53.0, 62.0], "Early-school band (GOS-ICH normative dataset, Alderson 2023, n=624)"
+    else:
+        stance_band, norm_source = [58.0, 62.0], "Adult reference band (Perry/Burnfield 2010)"
+    if age_years is not None:
+        kinematics_summary.append(
+            "Age banded {} y — stance reference band {:.0f}-{:.0f}% ({}); pediatric norms "
+            "converge to adult bands by ~7 y; growth-planned interpretation required.".format(
+                age_years, stance_band[0], stance_band[1], norm_source))
+
     result = {
         "analyzer": ANALYZER,
         "version": VERSION,
@@ -1954,7 +2001,8 @@ def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs,
             "cycle_seconds": round(cycle_seconds, 3) if cycle_seconds is not None else None,
             "stance_pct": stance_pct,
             "swing_pct": swing_pct,
-            "stance_norm_band": [58.0, 62.0],
+            "stance_norm_band": stance_band,
+            "stance_norm_source": norm_source,
             "phases": phases,
             "anomalies": anomalies,
             "running": running,
@@ -1972,6 +2020,7 @@ def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs,
                            "stance_notes": [d["description"] for d in rotational_defs]},
         },
         "kinematics": {"rom": rom_rows, "summary": kinematics_summary},
+        "cp_knee": cp_knee_block,
         "muscles": {
             "overactive": overactive or [{"name": "Gastrocnemius / Soleus", "role": "Primary plantarflexors"}],
             "weak": weak or [{"name": "Tibialis anterior", "role": "Dorsiflexion during swing"}],
@@ -2282,6 +2331,14 @@ def main():
                              "anchor for anthropometric segmentation (run.txt §2)")
     parser.add_argument("--speed-hint", default="auto",
                         help="clinician's playback-speed ground truth: auto|normal|running|slowmo_120|slowmo_240")
+    parser.add_argument("--age-years", default=None, type=float,
+                        help="patient age in years — selects age-banded pediatric norm ranges "
+                             "(zero-assumption: missed prematurity when absent)")
+    parser.add_argument("--gender", default="",
+                        help="patient gender string for the report context block")
+    parser.add_argument("--context", default="",
+                        help="JSON clinical context block (e.g. GMFCS level) merged into the "
+                             "results as archetype_context — never inferred, only echoed")
     args = parser.parse_args()
 
     speed_hint = str(args.speed_hint or "auto").strip().lower() or "auto"
@@ -2434,8 +2491,21 @@ def main():
     tracks_for_anthro = {tr.get("slot"): tr for tr in list(TRACK_CACHE.values())
                          if tr.get("slot") in ("sagittal", "frontal") and tr.get("landmarks")}
     anthro_block = anthropometry.compute_anthropometrics(tracks_for_anthro, height_cm)
+    try:
+        context_block = json.loads(args.context) if args.context else {}
+    except (ValueError, TypeError):
+        context_block = {}
+    gmfcs_context = context_block.get("gmfcs") or None
     result = derive_clinical(cv_sagittal, cv_frontal, args.session, args.patient, artifacts, artifacts,
-                             anthropometry_block=anthro_block)
+                             anthropometry_block=anthro_block,
+                             age_years=(float(args.age_years) if args.age_years is not None else None))
+    # Pediatric norms + clinical-context linkage (spec §14.2 / Phase D):
+    result["archetype_context"] = {
+        "age_years": (float(args.age_years) if args.age_years is not None else None),
+        "gender": (args.gender or None),
+        "gmfcs": gmfcs_context,
+        "cp_knee": result.get("cp_knee"),
+    }
     _tick("derive_graphs")
 
     # 2e.txt item 1 — multi-view 3D pipeline: when BOTH planes are available,

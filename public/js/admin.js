@@ -1,4 +1,4 @@
-﻿// public/js/admin.js
+// public/js/admin.js
 // Guards the admin dashboard (must be logged in with role 'admin' or 'super_admin'),
 // loads overview stats + charts, and powers the Patients/Appointments/Assessments/Reports/Messages tables,
 // plus the classified User Management (users + audit logs) sections.
@@ -82,9 +82,9 @@ const STATUS_CLASS = { pending: 'pending', active: 'confirmed', suspended: 'canc
 // admin        → every section except Settings (staff management is server-guarded too)
 // clinician    → READ-ONLY: overview, appointments, messages only (no edit controls)
 const SECTION_ACCESS = {
-  super_admin: ['overview', 'patients', 'appointments', 'assessments', 'reports', 'users', 'audit', 'messages', 'blog', 'research', 'gait', 'settings'],
-  admin: ['overview', 'patients', 'appointments', 'assessments', 'reports', 'users', 'audit', 'messages', 'blog', 'research', 'gait'],
-  clinician: ['overview', 'appointments', 'messages']
+  super_admin: ['overview', 'patients', 'appointments', 'assessments', 'reports', 'users', 'audit', 'messages', 'blog', 'research', 'gait', 'scales', 'settings'],
+  admin: ['overview', 'patients', 'appointments', 'assessments', 'reports', 'users', 'audit', 'messages', 'blog', 'research', 'gait', 'scales'],
+  clinician: ['overview', 'appointments', 'messages', 'scales']
 };
 function applyRoleAccess(role) {
   const allowed = SECTION_ACCESS[role] || SECTION_ACCESS.clinician;
@@ -101,6 +101,8 @@ function applyRoleAccess(role) {
 const ACTION_LABELS = {
   create_user: 'Account created', edit_user: 'Account updated', reset_password: 'Password override',
   set_status: 'Status changed', delete_user: 'Account deleted', purge_user: 'Account hard-deleted',
+  delete_patient: 'Patient deleted', appointment_delete: 'Appointment deleted',
+  assessment_delete: 'Assessment deleted', contact_delete: 'Message deleted',
   export_xlsx: 'XLSX export', export_overview_pdf: 'Overview PDF', export_docx: 'DOCX export',
   update_settings: 'Settings updated', backup_database: 'Database backup',
   blog_create: 'Blog post created', blog_update: 'Blog post updated', blog_delete: 'Blog post deleted',
@@ -152,7 +154,7 @@ function setupNav() {
       // highlight all links pointing at this target (e.g. the "Go to Patients" shortcut in Reports)
       document.querySelectorAll(`.admin-nav-link[data-target="${link.dataset.target}"]`).forEach(l => l.classList.add('active'));
       const target = link.dataset.target;
-      ['overview', 'patients', 'appointments', 'assessments', 'reports', 'users', 'audit', 'messages', 'blog', 'research', 'gait', 'settings'].forEach(section => {
+      ['overview', 'patients', 'appointments', 'assessments', 'reports', 'users', 'audit', 'messages', 'blog', 'research', 'gait', 'scales', 'settings'].forEach(section => {
         document.getElementById(`section-${section}`).style.display = section === target ? 'block' : 'none';
       });
       if (target === 'patients') loadPatients();
@@ -164,6 +166,7 @@ function setupNav() {
       if (target === 'blog') loadBlog();
       if (target === 'research') loadResearch();
       if (target === 'gait') loadGait();
+      if (target === 'scales') loadScales();
       if (target === 'settings') loadSettings();
       closeSidebar(); // collapse the drawer on phones after picking a section
     });
@@ -416,15 +419,24 @@ function renderPatientsTable(patients) {
     <tr>
       <td>${escapeHtml(p.guardian_name)}</td>
       <td>${escapeHtml(p.child_name)}</td>
-      <td>${escapeHtml(p.diagnosis || 'â€”')}</td>
+      <td>${escapeHtml(p.diagnosis || '—')}</td>
       <td>${escapeHtml(p.diagnosis_category)}</td>
       <td>${escapeHtml(p.username)}</td>
       <td>${p.appointment_count}</td>
-      <td><button class="row-link" data-patient-id="${p.id}">View â†’</button></td>
+      <td>
+        <button class="row-link" data-patient-id="${p.id}">View →</button>
+        ${window.dashboardAccess && window.dashboardAccess.canAct ? `<button class="row-link danger-link" data-patient-delete="${p.id}">Delete</button>` : ''}
+      </td>
     </tr>
   `).join('');
   body.querySelectorAll('[data-patient-id]').forEach(btn => {
     btn.addEventListener('click', () => openPatientModal(btn.dataset.patientId));
+  });
+  body.querySelectorAll('[data-patient-delete]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = patientsCache.find(x => String(x.id) === String(btn.dataset.patientDelete));
+      deletePatient(p);
+    });
   });
 }
 
@@ -438,7 +450,7 @@ async function openPatientModal(id) {
 
     modalContent.innerHTML = `
       <h2>${escapeHtml(patient.child_name)}</h2>
-      <p style="color:var(--ink-600); margin-bottom:20px;">Guardian: ${escapeHtml(patient.guardian_name)} Â· ${escapeHtml(patient.username)}</p>
+      <p style="color:var(--ink-600); margin-bottom:20px;">Guardian: ${escapeHtml(patient.guardian_name)} · ${escapeHtml(patient.username)}</p>
 
       <div class="modal-section">
         <h4>Profile</h4>
@@ -453,11 +465,11 @@ async function openPatientModal(id) {
         ${appointments.length === 0 ? '<p style="color:var(--ink-600);">None yet.</p>' : appointments.map(a => `
           <div class="modal-domain-row" style="flex-direction:column; align-items:flex-start; gap:4px;">
             <div style="display:flex; justify-content:space-between; width:100%;">
-              <span>${escapeHtml(a.therapy_types.join(', '))} â€” ${a.mode === 'online' ? 'Online' : 'In-Clinic'}</span>
+              <span>${escapeHtml(a.therapy_types.join(', '))} — ${a.mode === 'online' ? 'Online' : 'In-Clinic'}</span>
               <span class="status-badge status-${a.status}">${a.status}</span>
             </div>
             <span style="font-size:0.8rem; color:var(--ink-600);">
-              Preferred date: ${a.preferred_date ? formatDate(a.preferred_date) : 'Not specified'} Â· Booked ${formatDate(a.created_at)}
+              Preferred date: ${a.preferred_date ? formatDate(a.preferred_date) : 'Not specified'} · Booked ${formatDate(a.created_at)}
             </span>
             ${a.notes ? `<span style="font-size:0.8rem; color:var(--ink-600);">Notes: ${escapeHtml(a.notes)}</span>` : ''}
           </div>
@@ -481,8 +493,8 @@ async function openPatientModal(id) {
       <div class="modal-section">
         <h4>Export This Patient's Report</h4>
         <div class="modal-export-row">
-          <a class="btn btn-outline" href="/api/admin/export/patient/${patient.id}/report.pdf" style="font-size:0.85rem;">â¬‡ PDF Report</a>
-          <a class="btn btn-outline" href="/api/admin/export/patient/${patient.id}/report.docx" style="font-size:0.85rem;">â¬‡ Word Report</a>
+          <a class="btn btn-outline" href="/api/admin/export/patient/${patient.id}/report.pdf" style="font-size:0.85rem;">↓ PDF Report</a>
+          <a class="btn btn-outline" href="/api/admin/export/patient/${patient.id}/report.docx" style="font-size:0.85rem;">↓ Word Report</a>
         </div>
       </div>
 
@@ -558,13 +570,13 @@ function setupAppointmentFilters() {
 
 async function loadAppointments(status) {
   const body = document.getElementById('appointments-body');
-  body.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+  body.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
   try {
     const url = status === 'all' ? '/api/admin/appointments' : `/api/admin/appointments?status=${status}`;
     const res = await fetch(url);
     const { appointments } = await res.json();
     if (appointments.length === 0) {
-      body.innerHTML = '<tr><td colspan="6">No appointments found.</td></tr>';
+      body.innerHTML = '<tr><td colspan="7">No appointments found.</td></tr>';
       return;
     }
     body.innerHTML = appointments.map(a => {
@@ -582,6 +594,7 @@ async function loadAppointments(status) {
           <td>${a.preferred_date ? formatDate(a.preferred_date) : '—'}</td>
           <td>${formatDate(a.created_at)}</td>
           <td>${statusCell}</td>
+          <td>${window.dashboardAccess && window.dashboardAccess.canAct ? `<button class="row-link danger-link" data-appointment-delete="${a.id}">Delete</button>` : ''}</td>
         </tr>
       `;
     }).join('');
@@ -601,8 +614,11 @@ async function loadAppointments(status) {
         }
       });
     });
+    body.querySelectorAll('[data-appointment-delete]').forEach(btn => {
+      btn.addEventListener('click', () => deleteAppointment(btn.dataset.appointmentDelete));
+    });
   } catch (err) {
-    body.innerHTML = '<tr><td colspan="6">Could not load appointments.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7">Could not load appointments.</td></tr>';
   }
 }
 
@@ -621,13 +637,13 @@ function setupAssessmentFilters() {
 
 async function loadAssessments(status) {
   const body = document.getElementById('assessments-body');
-  body.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+  body.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
   try {
     const url = status === 'all' ? '/api/admin/assessments' : `/api/admin/assessments?status=${status}`;
     const res = await fetch(url);
     const { assessments } = await res.json();
     if (assessments.length === 0) {
-      body.innerHTML = '<tr><td colspan="6">No assessments found.</td></tr>';
+      body.innerHTML = '<tr><td colspan="7">No assessments found.</td></tr>';
       return;
     }
     body.innerHTML = assessments.map(a => `
@@ -637,14 +653,18 @@ async function loadAssessments(status) {
         <td>${a.flaggedDomains.length ? escapeHtml(a.flaggedDomains.join(', ')) : '<span style="color:var(--ink-600);">None</span>'}</td>
         <td>${formatDate(a.createdAt)}</td>
         <td><span class="status-badge status-${a.status === 'reviewed' ? 'completed' : 'pending'}">${a.status.replace('_', ' ')}</span></td>
-        <td><button class="row-link" data-assessment-id="${a.id}">${a.status === 'reviewed' ? 'View â†’' : 'Review â†’'}</button></td>
+        <td><button class="row-link" data-assessment-id="${a.id}">${a.status === 'reviewed' ? 'View →' : 'Review →'}</button></td>
+        <td>${window.dashboardAccess && window.dashboardAccess.canAct ? `<button class="row-link danger-link" data-assessment-delete="${a.id}">Delete</button>` : ''}</td>
       </tr>
     `).join('');
     body.querySelectorAll('[data-assessment-id]').forEach(btn => {
       btn.addEventListener('click', () => openAssessmentModal(btn.dataset.assessmentId));
     });
+    body.querySelectorAll('[data-assessment-delete]').forEach(btn => {
+      btn.addEventListener('click', () => deleteAssessment(btn.dataset.assessmentDelete));
+    });
   } catch (err) {
-    body.innerHTML = '<tr><td colspan="6">Could not load assessments.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7">Could not load assessments.</td></tr>';
   }
 }
 
@@ -672,7 +692,7 @@ async function openAssessmentModal(id) {
 
     modalContent.innerHTML = `
       <h2>${escapeHtml(a.childName)}</h2>
-      <p style="color:var(--ink-600); margin-bottom:20px;">Guardian: ${escapeHtml(a.guardianName)} Â· ${escapeHtml(a.username)} Â· Submitted ${formatDate(a.createdAt)}</p>
+      <p style="color:var(--ink-600); margin-bottom:20px;">Guardian: ${escapeHtml(a.guardianName)} · ${escapeHtml(a.username)} · Submitted ${formatDate(a.createdAt)}</p>
 
       <div class="modal-section">
         <h4>Preliminary Summary (shown to patient)</h4>
@@ -694,7 +714,7 @@ async function openAssessmentModal(id) {
         <h4>Staff Conclusion</h4>
         ${a.adminConclusion ? `
           <p style="font-size:0.9rem; padding:12px; background:var(--sky-100); border-radius:8px;">${escapeHtml(a.adminConclusion)}</p>
-          <p style="font-size:0.78rem; color:var(--ink-600); margin-top:6px;">â€” ${escapeHtml(a.adminReviewer || 'Staff')}, ${formatDate(a.reviewedAt)}</p>
+          <p style="font-size:0.78rem; color:var(--ink-600); margin-top:6px;">— ${escapeHtml(a.adminReviewer || 'Staff')}, ${formatDate(a.reviewedAt)}</p>
         ` : `
           <div id="conclusion-msg" class="form-msg"></div>
           <div class="field">
@@ -785,6 +805,96 @@ function hideModal() {
   if (box) box.classList.remove('wide');
 }
 
+// ---- Shared typed-confirmation delete dialog (records in the admin tables) ----
+// `opts`: { title, description, endpoint, token='DELETE', tokenLabel='DELETE',
+//           buttonLabel='Delete', reload }
+function openDeleteConfirm(opts) {
+  const modalContent = document.getElementById('modal-content');
+  const modalBox = modalContent.parentElement;
+  const tokenLabel = opts.tokenLabel || 'DELETE';
+  modalBox.classList.remove('wide');
+  modalContent.innerHTML = `
+    <h2 style="color:var(--danger);">${opts.title}</h2>
+    <p class="field-hint">${opts.description}</p>
+    <div class="modal-section">
+      <div class="field"><label for="del-confirm">Type <strong>${escapeHtml(tokenLabel)}</strong> to confirm</label><input type="text" id="del-confirm" maxlength="12" autocomplete="off"></div>
+    </div>
+    <div id="del-msg" class="form-msg"></div>
+    <div class="editor-actions">
+      <button class="btn btn-primary" id="del-save" disabled style="background:var(--danger);">${opts.buttonLabel || 'Delete'}</button>
+      <button class="btn btn-ghost" id="del-cancel">Cancel</button>
+    </div>
+  `;
+  showModal();
+  document.getElementById('del-cancel').addEventListener('click', hideModal);
+  const confirmEl = document.getElementById('del-confirm');
+  const saveBtn = document.getElementById('del-save');
+  confirmEl.addEventListener('input', () => {
+    saveBtn.disabled = confirmEl.value.trim().toUpperCase() !== (opts.token || 'DELETE').toUpperCase();
+  });
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Deleting...';
+    const msgEl = document.getElementById('del-msg');
+    try {
+      const res = await fetch(opts.endpoint, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: opts.token || 'DELETE' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not delete.');
+      showFormMsg(msgEl, data.message, 'success');
+      if (typeof opts.reload === 'function') opts.reload();
+      setTimeout(hideModal, 6000);
+    } catch (err) {
+      showFormMsg(msgEl, err.message, 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = opts.buttonLabel || 'Delete';
+    }
+  });
+}
+
+function deletePatient(p) {
+  if (!p) return;
+  openDeleteConfirm({
+    title: 'Delete Patient — ' + escapeHtml(p.child_name || p.guardian_name),
+    description: 'This is a <strong>soft delete</strong>: the patient account is hidden from the patient list and cannot log in, but its records are retained for the audit trail.',
+    endpoint: `/api/admin/patients/${p.id}`,
+    reload: loadPatients
+  });
+}
+
+function deleteAppointment(id) {
+  const active = document.querySelector('#appt-filter-pills .filter-pill.active')?.dataset.status || 'all';
+  openDeleteConfirm({
+    title: 'Delete Appointment',
+    description: 'This <strong>permanently removes</strong> the booking from the schedule. This cannot be undone.',
+    endpoint: `/api/admin/appointments/${id}`,
+    reload: () => loadAppointments(active)
+  });
+}
+
+function deleteAssessment(id) {
+  const active = document.querySelector('#assess-filter-pills .filter-pill.active')?.dataset.status || 'all';
+  openDeleteConfirm({
+    title: 'Delete Assessment',
+    description: 'This <strong>permanently removes</strong> the submitted assessment and all of its responses. This cannot be undone.',
+    endpoint: `/api/admin/assessments/${id}`,
+    reload: () => loadAssessments(active)
+  });
+}
+
+function deleteMessage(id) {
+  openDeleteConfirm({
+    title: 'Delete Message',
+    description: 'This <strong>permanently removes</strong> the contact form message and any saved reply. This cannot be undone.',
+    endpoint: `/api/admin/messages/${id}`,
+    reload: loadMessages,
+    buttonLabel: 'Delete Message'
+  });
+}
+
 // ================= MESSAGES =================
 
 let contactMessagesCache = [];
@@ -818,10 +928,16 @@ async function loadMessages() {
           ? '<span style="color:#2F7A4D;font-size:.82rem;">' + (m.replied_by ? escapeHtml(m.replied_by) + ' · ' : '') + formatDate(m.replied_at) + '</span>'
           : '<span style="color:#B3452F;font-size:.82rem;">Not answered yet</span>'}</td>
         ${(window.dashboardAccess && window.dashboardAccess.canAct)
-          ? `<td><button class="btn btn-outline btn-sm" onclick="openReplyModal(${m.id})">${m.replied ? 'View / Reply' : 'Reply'}</button></td>`
+          ? `<td>
+              <button class="btn btn-outline btn-sm" onclick="openReplyModal(${m.id})">${m.replied ? 'View / Reply' : 'Reply'}</button>
+              <button class="btn btn-outline btn-sm danger-link" data-message-delete="${m.id}">Delete</button>
+            </td>`
           : '<td><span style="color:var(--ink-400);font-size:.82rem;">—</span></td>'}
       </tr>
     `).join('');
+    body.querySelectorAll('[data-message-delete]').forEach(btn => {
+      btn.addEventListener('click', () => deleteMessage(btn.dataset.messageDelete));
+    });
   } catch (err) {
     body.innerHTML = '<tr><td colspan="6">Could not load messages.</td></tr>';
   }
@@ -1010,14 +1126,19 @@ function gaitRowHtml(s) {
   `;
 }
 
-function handleGaitRowAction(action, id, btn) {
+async function handleGaitRowAction(action, id, btn) {
   if (action === 'report') { openGaitReport(id); return; }
   if (action === 'review') { openGaitReviewModal(id); return; }
   if (action === 'edit') { openGaitEditModal(id); return; }
   if (action === 'details') { openGaitDetailsModal(id); return; }
   if (action === 'delete') {
-    if (!window.confirm(`Delete gait session #${id} and its videos/artifacts? This cannot be undone.`)) return;
-    fetch(`/api/gait/sessions/${id}`, { method: 'DELETE' }).then(() => loadGait());
+    if (!window.confirm(`Delete gait session #${id}? It removes the videos, report and artifacts permanently. Press OK to delete, or Cancel to keep it.`)) return;
+    try {
+      const res = await fetch(`/api/gait/sessions/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not delete the session.');
+      loadGait();
+    } catch (err) { alert(err.message); }
   }
 }
 
@@ -1323,9 +1444,9 @@ function renderManagerPagination(elId, mgr, reload) {
   if (!el) return;
   if (mgr.totalPages <= 1) { el.innerHTML = ''; return; }
   el.innerHTML = `
-    <button class="btn btn-outline btn-sm" data-dir="-1" ${mgr.page <= 1 ? 'disabled' : ''}>â† Prev</button>
+    <button class="btn btn-outline btn-sm" data-dir="-1" ${mgr.page <= 1 ? 'disabled' : ''}>← Prev</button>
     <span class="page-info">Page ${mgr.page} of ${mgr.totalPages}</span>
-    <button class="btn btn-outline btn-sm" data-dir="1" ${mgr.page >= mgr.totalPages ? 'disabled' : ''}>Next â†’</button>
+    <button class="btn btn-outline btn-sm" data-dir="1" ${mgr.page >= mgr.totalPages ? 'disabled' : ''}>Next →</button>
   `;
   el.querySelectorAll('button[data-dir]').forEach(b => {
     if (b.disabled) return;
@@ -1343,9 +1464,9 @@ function blogRowHtml(p) {
       <td>${escapeHtml(p.category)}</td>
       <td>${escapeHtml(p.author)}</td>
       <td><span class="status-badge status-${p.status === 'published' ? 'confirmed' : 'pending'}">${p.status}</span></td>
-      <td>${p.publishedAt ? formatDate(p.publishedAt) : 'â€”'}</td>
+      <td>${p.publishedAt ? formatDate(p.publishedAt) : '—'}</td>
       <td style="white-space:nowrap;">
-        <button class="row-link" data-action="view" data-id="${p.id}" data-slug="${escapeHtml(p.slug)}">View â†’</button>
+        <button class="row-link" data-action="view" data-id="${p.id}" data-slug="${escapeHtml(p.slug)}">View →</button>
         <button class="row-link" data-action="edit" data-id="${p.id}" style="margin-left:10px;">Edit</button>
         <button class="row-link" data-action="delete" data-id="${p.id}" style="margin-left:10px; color:var(--danger);">Delete</button>
       </td>
@@ -1359,10 +1480,10 @@ function researchRowHtml(p) {
       <td>${escapeHtml(p.category)}</td>
       <td>${escapeHtml(p.author)}</td>
       <td><span class="status-badge status-${p.status === 'published' ? 'confirmed' : 'pending'}">${p.status}</span></td>
-      <td>${p.publishedAt ? formatDate(p.publishedAt) : 'â€”'}</td>
-      <td>${p.hasFile ? 'Attached' : 'â€”'}</td>
+      <td>${p.publishedAt ? formatDate(p.publishedAt) : '—'}</td>
+      <td>${p.hasFile ? 'Attached' : '—'}</td>
       <td style="white-space:nowrap;">
-        <button class="row-link" data-action="view" data-id="${p.id}" data-slug="${escapeHtml(p.slug)}">View â†’</button>
+        <button class="row-link" data-action="view" data-id="${p.id}" data-slug="${escapeHtml(p.slug)}">View →</button>
         <button class="row-link" data-action="edit" data-id="${p.id}" style="margin-left:10px;">Edit</button>
         <button class="row-link" data-action="delete" data-id="${p.id}" style="margin-left:10px; color:var(--danger);">Delete</button>
       </td>
@@ -1625,7 +1746,7 @@ function renderResearchEditor(paper, id) {
       <h4>PDF Attachment</h4>
       ${paper.hasFile && paper.fileName ? `
         <div class="file-attachment" id="re-file-box">
-          <span><strong>${escapeHtml(paper.fileName)}</strong> â€” attached</span>
+          <span><strong>${escapeHtml(paper.fileName)}</strong> — attached</span>
           ${id ? `<button class="btn btn-outline btn-sm" id="re-remove-file">Remove PDF</button>` : ''}
         </div>
       ` : ''}
@@ -2549,4 +2670,381 @@ function showFormMsg(el, message, type) {
   el.textContent = message;
   el.className = 'form-msg ' + (type || 'error');
   el.style.display = 'block';
+}
+
+// ================= CLINICAL SCALES (BBS / TUG / GMFCS / OGA) =================
+// All interpretation lives in the offline Python engines (python/bbs_engine.py,
+// python/scales_registry.py), reached via /api/scales — this UI only collects
+// observed scores and renders engine payloads verbatim (zero-assumption, spec P1).
+
+const SCALE_LABELS = { bbs: 'Berg Balance Scale', tug: 'Timed Up & Go', gmfcs: 'GMFCS-E&R', oga: 'OGA Checklist' };
+
+// Frontend mirror of BBS_ITEMS_DEF in python/bbs_engine.py (task label + gait_belt flag).
+// The biomechanics mapping itself is engine-side; never duplicated here.
+const BBS_ITEMS_UI = [
+  { n: 1, task: 'Sitting to standing', belt: false },
+  { n: 2, task: 'Standing unsupported', belt: false },
+  { n: 3, task: 'Sitting unsupported', belt: false },
+  { n: 4, task: 'Standing to sitting', belt: false },
+  { n: 5, task: 'Transfers', belt: true },
+  { n: 6, task: 'Standing with eyes closed', belt: false },
+  { n: 7, task: 'Standing with feet together', belt: false },
+  { n: 8, task: 'Reaching forward with outstretched arm', belt: true },
+  { n: 9, task: 'Retrieving object from floor', belt: true },
+  { n: 10, task: 'Turning to look behind', belt: false },
+  { n: 11, task: 'Turning 360 degrees', belt: true },
+  { n: 12, task: 'Placing alternate foot on stool', belt: true },
+  { n: 13, task: 'Tandem stance', belt: true },
+  { n: 14, task: 'Standing on one leg', belt: true }
+];
+
+const GMFCS_LEVELS_UI = { I: 'Walks without limitations', II: 'Walks with limitations (balance, endurance)', III: 'Walks using a hand-held mobility device', IV: 'Self-mobility with limitations; may use powered mobility', V: 'Transported in a manual wheelchair' };
+
+let scalesState = { patientId: null, scaleType: 'bbs' };
+
+async function loadScales() {
+  // populate the patient selector (reuse patientsCache when available)
+  const sel = document.getElementById('scales-patient');
+  const formBody = document.getElementById('scales-form-body');
+  const formWrap = document.getElementById('scales-form-wrap');
+  const saveMsg = document.getElementById('scales-save-msg');
+  if (saveMsg) saveMsg.style.display = 'none';
+
+  try {
+    if (!patientsCache.length) {
+      const res = await fetch('/api/admin/patients');
+      if (!res.ok) throw new Error('Question');
+      const { patients } = await res.json();
+      patientsCache = patients;
+    }
+  } catch (err) {
+    sel.innerHTML = '<option value="">Could not load patients.</option>';
+    return;
+  }
+
+  if (patientsCache.length === 0) {
+    sel.innerHTML = '<option value="">No patients registered yet.</option>';
+    formWrap.style.display = 'none';
+    document.getElementById('scales-body').innerHTML = '<tr><td colspan="6" class="empty-state">Register a patient first.</td></tr>';
+    return;
+  }
+  formWrap.style.display = '';
+  sel.innerHTML = '<option value="">— Select patient —</option>' +
+    patientsCache.map(p => `<option value="${p.id}">${escapeHtml(p.child_name)} (${escapeHtml(p.guardian_name)})</option>`).join('');
+  sel.value = scalesState.patientId ? String(scalesState.patientId) : '';
+
+  // role gating: clinicians read records but cannot administer scales (P4)
+  const canAct = !window.dashboardAccess || window.dashboardAccess.canAct;
+  document.getElementById('scales-save-btn').style.display = canAct ? '' : 'none';
+  formWrap.style.visibility = canAct ? 'visible' : 'hidden';
+
+  document.getElementById('scales-type-pills').querySelectorAll('.filter-pill').forEach(pill => {
+    pill.classList.toggle('active', pill.dataset.scale === scalesState.scaleType);
+  });
+
+  bindScalesListeners();
+  renderScalesForm();
+  loadScalesRecords();
+}
+
+function bindScalesListeners() {
+  const sel = document.getElementById('scales-patient');
+  if (!sel.dataset.bound) {
+    sel.dataset.bound = '1';
+    sel.addEventListener('change', () => {
+      scalesState.patientId = sel.value ? Number(sel.value) : null;
+      loadScalesRecords();
+    });
+  }
+  document.getElementById('scales-type-pills').querySelectorAll('.filter-pill').forEach(pill => {
+    if (pill.dataset.bound) return;
+    pill.dataset.bound = '1';
+    pill.addEventListener('click', () => {
+      scalesState.scaleType = pill.dataset.scale;
+      document.querySelectorAll('#scales-type-pills .filter-pill').forEach(x => x.classList.toggle('active', x === pill));
+      renderScalesForm();
+    });
+  });
+  const save = document.getElementById('scales-save-btn');
+  if (!save.dataset.bound) {
+    save.dataset.bound = '1';
+    save.addEventListener('click', submitScalesForm);
+  }
+}
+
+function renderScalesForm() {
+  const body = document.getElementById('scales-form-body');
+  const title = document.getElementById('scales-form-title');
+
+  if (scalesState.scaleType === 'bbs') {
+    title.textContent = 'Berg Balance Scale (BBS) — 14 items, 0–4 each';
+    body.innerHTML = `
+      <p class="mb-8" style="font-size:.85rem; color:var(--ink-600);">Score each task only from OBSERVED performance.
+      Items marked <span class="status-badge status-confirmed">belt</span> require the safety gait belt and a spotter within arm's reach.</p>
+      <div class="grid-2">
+        ${BBS_ITEMS_UI.map(it => `
+          <div class="field">
+            <label for="bbs-item-${it.n}">${it.n}. ${escapeHtml(it.task)} ${it.belt ? '<span class="status-badge status-confirmed" title="Safety gait belt required">belt</span>' : ''}</label>
+            <select id="bbs-item-${it.n}" data-bbs-item="${it.n}">
+              <option value="">Not scored yet</option>
+              ${[4, 3, 2, 1, 0].map(s => `<option value="${s}">${s === 4 ? '4 — independent / safe' : s === 3 ? '3 — needs supervision' : s === 2 ? '2 — minimal assistance' : s === 1 ? '1 — moderate assistance' : '0 — unable / max assistance'}</option>`).join('')}
+            </select>
+          </div>`).join('')}
+      </div>
+      <div class="field mt-8" style="max-width:380px;">
+        <label for="bbs-population">Condition context (research cutoff set)</label>
+        <select id="bbs-population">
+          <option value="general">General</option>
+          <option value="stroke">Stroke</option>
+        </select>
+      </div>`;
+    return;
+  }
+
+  if (scalesState.scaleType === 'tug') {
+    title.textContent = 'Timed Up & Go — 3 m walk, turn, return, sit';
+    body.innerHTML = `
+      <div class="grid-2">
+        <div class="field">
+          <label for="tug-seconds">Time (seconds)</label>
+          <input id="tug-seconds" type="number" min="1" max="300" step="0.1" placeholder="e.g. 12.6">
+        </div>
+        <div class="field">
+          <label for="tug-population">Population (cutoff set)</label>
+          <select id="tug-population">
+            <option value="general">General / community (≥13.5 s, Shumway-Cook 2000)</option>
+            <option value="stroke">Stroke (≥14 s)</option>
+            <option value="le_amputee">Lower-limb amputee (≥19 s)</option>
+            <option value="hip_oa">Hip osteoarthritis (≥10 s)</option>
+            <option value="vestibular">Vestibular disorders (≥11.1 s)</option>
+            <option value="community_elderly">Community elderly 65–85 (≥12 s)</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" style="max-width:420px;">
+        <label for="tug-device">Assistive device used</label>
+        <input id="tug-device" placeholder="None / cane / walker /…">
+      </div>
+      <div class="field">
+        <label>Observations (all that apply)</label>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          ${['Slow tentative pace', 'Loss of balance', 'Short strides', 'Little or no arm swing', 'Steadying self on walls', 'Shuffling', 'En-bloc turning', 'Not using device properly']
+            .map(o => `<label style="font-size:.85rem;"><input type="checkbox" data-tug-obs value="${o}"> ${o}</label>`).join('')}
+        </div>
+      </div>`;
+    return;
+  }
+
+  if (scalesState.scaleType === 'gmfcs') {
+    title.textContent = 'GMFCS-E&R — classification of usual performance (not a diagnosis)';
+    body.innerHTML = `
+      <div class="grid-2">
+        <div class="field">
+          <label for="gmfcs-level">Level</label>
+          <select id="gmfcs-level">
+            <option value="">— Select level —</option>
+            ${Object.entries(GMFCS_LEVELS_UI).map(([lv, t]) => `<option value="${lv}">Level ${lv} — ${escapeHtml(t)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label for="gmfcs-age">Age (years) — selects the age band</label>
+          <input id="gmfcs-age" type="number" min="0" max="18" step="0.5" placeholder="e.g. 7">
+        </div>
+      </div>
+      <div class="field" style="max-width:420px;">
+        <label for="gmfcs-via">Reported by</label>
+        <select id="gmfcs-via">
+          <option value="clinician">Clinician</option>
+          <option value="family_report">Family Report Questionnaire</option>
+        </select>
+      </div>
+      <p style="font-size:.82rem; color:var(--ink-600);">© GMFCS-E&R Palisano, Rosenbaum, Bartlett, Livingston 2007, CanChild Centre, McMaster University.
+      Classifies current function; cannot detect change over time (SOURCES.md R9/R10).</p>`;
+    return;
+  }
+
+  // oga
+  title.textContent = 'Rancho Los Amigos OGA — observational checklist (both sides)';
+  const SEGMENTS = {
+    'Ankle & Foot': ['Forefoot initial contact (equinus)', 'Foot slap', 'Excessive DF at loading', 'Heel rise early / delayed', 'Toe drag in swing', 'Varus foot posture', 'Valgus foot posture', 'Forefoot abduction'],
+    'Knee': ['Excessive knee flexion in stance (crouch)', 'Knee hyperextension in stance (recurvatum)', 'Insufficient knee flexion in stance', 'Early knee flexion spike in loading (jump)', 'Reduced knee flexion in swing (stiff)', 'Varus thrust', 'Valgus thrust'],
+    'Hip': ['Excessive flexion in stance', 'Reduced extension at terminal stance', 'Excessive adduction (scissoring)', 'Excessive abduction', 'Hip hiking', 'Circumduction'],
+    'Pelvis': ['Anterior tilt', 'Posterior tilt', 'Pelvic drop (ipsilateral)', 'Pelvic drop (contralateral) / Trendelenburg', ' Increased pelvic rotation', 'Reduced pelvic rotation', 'Lateral pelvic protrusion'],
+    'Trunk': ['Anterior lean', 'Lateral lean (ipsilateral)', 'Lateral lean (contralateral)', 'Increased lumbar lordosis', 'Decreased arm swing', 'En-bloc rotation']
+  };
+  const phases = ['Initial contact', 'Loading response', 'Mid stance', 'Terminal stance', 'Pre-swing', 'Initial swing', 'Mid swing', 'Terminal swing'];
+  let idx = 0;
+  body.innerHTML = `
+    <p class="mb-8" style="font-size:.85rem; color:var(--ink-600);">Record each deviation with its timing and side. One segment at a time (GHORT).</p>
+    ${Object.entries(SEGMENTS).map(([seg, devs]) => `
+      <h4 class="mt-8" style="font-size:.8rem; text-transform:uppercase; color:var(--ink-600);">${escapeHtml(seg)}</h4>
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        ${devs.map(d => {
+          idx += 1;
+          return `
+          <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:.85rem;">
+            <input type="checkbox" data-oga-dev id="oga-dev-${idx}" data-seg="${escapeHtml(seg)}" data-dev="${escapeHtml(d.trim())}" value="${idx}">
+            <label for="oga-dev-${idx}" style="min-width:280px;">${escapeHtml(d.trim())}</label>
+            <select data-oga-phase class="status-select" style="width:150px;">${phases.map(ph => `<option value="${ph}">${ph}</option>`).join('')}</select>
+            <select data-oga-side class="status-select" style="width:80px;"><option>L</option><option>R</option><option>L&amp;R</option></select>
+          </div>`;
+        }).join('')}
+      </div>`).join('')}`;
+}
+
+async function submitScalesForm() {
+  const msg = document.getElementById('scales-save-msg');
+  if (!scalesState.patientId) { hiddenMsgetti(msg, 'Select a patient first.'); return; }
+  const type = scalesState.scaleType;
+  const notes = document.getElementById('scales-notes').value.trim();
+
+  try {
+    let body;
+    if (type === 'bbs') {
+      const items = {};
+      document.querySelectorAll('[data-bbs-item]').forEach(sel => { if (sel.value !== '') items[sel.dataset.bbsItem] = Number(sel.value); });
+      if (!Object.keys(items).length) { hiddenMsgetti(msg, 'Score at least one item.'); return; }
+      body = { items, population: document.getElementById('bbs-population').value, notes };
+    } else if (type === 'tug') {
+      const seconds = parseFloat(document.getElementById('tug-seconds').value);
+      if (!(seconds > 0)) { hiddenMsgetti(msg, 'Enter the recorded time.'); return; }
+      body = { data: {
+        seconds, population: document.getElementById('tug-population').value,
+        assistive_device: document.getElementById('tug-device').value.trim() || null,
+        observations: Array.from(document.querySelectorAll('[data-tug-obs]:checked')).map(x => x.value)
+      }, notes };
+    } else if (type === 'gmfcs') {
+      const level = document.getElementById('gmfcs-level').value;
+      const age = parseFloat(document.getElementById('gmfcs-age').value);
+      if (!level) { hiddenMsgetti(msg, 'Select a GMFCS level.'); return; }
+      body = { data: { level, age_years: isNaN(age) ? null : age, reported_via: document.getElementById('gmfcs-via').value }, notes };
+    } else {
+      const observations = [];
+      document.querySelectorAll('[data-oga-dev]:checked').forEach(cb => {
+        const row = cb.closest('div');
+        observations.push({
+          segment: cb.dataset.seg, deviation: cb.dataset.dev,
+          phase: row.querySelector('[data-oga-phase]').value,
+          side: row.querySelector('[data-oga-side]').value
+        });
+      });
+      if (!observations.length) { hiddenMsgetti(msg, 'Tick at least one observed deviation.'); return; }
+      body = { data: { observations }, notes };
+    }
+
+    const res = await fetch(`/api/scales/${scalesState.patientId}/${type}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not save the record.');
+    showFormMsg(msg, `Saved ${SCALE_LABELS[type]} record #${data.id} — engine status: ${data.status}.`, 'success');
+    document.getElementById('scales-notes').value = '';
+    loadScalesRecords();
+  } catch (err) { hiddenMsgetti(msg, err.message); }
+}
+
+function hiddenMsgetti(el, message) { showFormMsg(el, message, 'error'); }
+
+async function loadScalesRecords() {
+  const body = document.getElementById('scales-body');
+  window.__scalesCache = window.__scalesCache || {};
+  if (!scalesState.patientId) {
+    document.getElementById('scales-records-title').textContent = 'Records for this patient';
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">Select a patient.</td></tr>';
+    return;
+  }
+  const p = patientsCache.find(x => String(x.id) === String(scalesState.patientId));
+  document.getElementById('scales-records-title').textContent = `Records — ${p ? escapeHtml(p.child_name) : 'patient'}`;
+  body.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+  try {
+    const res = await fetch(`/api/scales/patient/${scalesState.patientId}`);
+    const { records } = await res.json();
+    records.forEach(r => { window.__scalesCache[r.id] = r; });
+    if (!records.length) { body.innerHTML = '<tr><td colspan="6" class="empty-state">No scale records yet.</td></tr>'; return; }
+    body.innerHTML = records.map(r => {
+      const pay = r.payload || {};
+      let result = '—';
+      if (r.scale_type === 'bbs' && pay.total_score != null)
+        result = `${pay.total_score}/56 · ${pay.mobility_band ? pay.mobility_band.level : ''}${r.total != null ? '' : ''}`;
+      else if (r.scale_type === 'tug' && pay.seconds != null)
+        result = `${pay.seconds} s · cutoff ${pay.interpretation ? pay.interpretation.cutoff_s : '—'} s`;
+      else if (r.scale_type === 'gmfcs')
+        result = pay.level ? `Level ${pay.level} (${pay.age_label || '?'})` : 'unassessed';
+      else if (r.scale_type === 'oga') result = `${pay.total || (r.items ? JSON.parse(r.items).length : 0)} deviations noted`;
+      else result = r.status;
+      return `
+        <tr>
+          <td><strong>${escapeHtml(SCALE_LABELS[r.scale_type] || r.scale_type)}</strong></td>
+          <td><span class="status-badge status-${r.status === 'reviewed' || r.status === 'assessed' ? 'confirmed' : 'pending'}">${escapeHtml(r.status)}</span></td>
+          <td>${result}</td>
+          <td>${escapeHtml(r.assessor || '—')}</td>
+          <td>${formatDate(r.created_at)}</td>
+          <td>
+            <button class="row-link" data-scale-details="${r.id}">Details</button>
+            ${window.dashboardAccess && window.dashboardAccess.canAct ? `<button class="row-link danger-link" data-scale-delete="${r.id}">Delete</button>` : ''}
+          </td>
+        </tr>`;
+    }).join('');
+    body.querySelectorAll('[data-scale-details]').forEach(btn => {
+      btn.addEventListener('click', () => openScaleDetailsModal(Number(btn.dataset.scaleDetails)));
+    });
+    body.querySelectorAll('[data-scale-delete]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.scaleDelete;
+        if (!window.confirm(`Delete scale record #${id}?`)) return;
+        const res = await fetch(`/api/scales/${id}`, { method: 'DELETE' });
+        if (!res.ok) { const d = await res.json(); alert(d.error || 'Could not delete.'); return; }
+        loadScalesRecords();
+      });
+    });
+  } catch (err) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">Could not load scale records.</td></tr>';
+  }
+}
+
+async function openScaleDetailsModal(id) {
+  const body = document.getElementById('modal-content');
+  showModal();
+  body.innerHTML = '<p class="empty-state">Loading record…</p>';
+  try {
+    // fetch via patient records list (kept endpoint-light)
+    const recs = await Promise.all(patientsCache.map(async () => null)); // noop keeps lints quiet
+    const stored = window.__scalesCache && window.__scalesCache[id];
+    const r = stored || null;
+    if (!r) throw new Error('Record not available locally.');
+    const pay = r.payload || {};
+    let html = `<h2>${escapeHtml(SCALE_LABELS[r.scale_type] || r.scale_type)} #${id}</h2>
+      <p style="color:var(--ink-600); font-size:.9rem;">Recorded ${formatDate(r.created_at)} by ${escapeHtml(r.assessor || '—')} · status: ${escapeHtml(r.status)}</p>`;
+    if (r.scale_type === 'bbs') {
+      html += `<h4 class="mt-16">Result: ${pay.total_score ?? '—'} / 56</h4>
+        <div class="tags mt-8">
+          <span class="status-badge status-confirmed">${escapeHtml(pay.mobility_band ? pay.mobility_band.level : '')}</span>
+          <span class="status-badge">${escapeHtml(pay.fall_screen ? `${pay.fall_screen.population_label}: cutoff ${pay.fall_screen.cutoff} — ${pay.fall_screen.risk_flagged ? 'RISK FLAGGED' : 'not flagged'}` : '')}</span>
+        </div>
+        <h4 class="mt-16">Falls-risk text</h4><p style="font-size:.85rem;">${escapeHtml(pay.fall_screen ? pay.fall_screen.text : '')}</p>
+        ${(pay.gait_impact_flags || []).length ? `<h4 class="mt-16">Gait-relevant flags (low items ≤2)</h4>
+        ${pay.gait_impact_flags.map(f => `<div class="mt-8" style="font-size:.9rem;">• <strong>Item ${f.item} — ${escapeHtml(f.task)} (${f.score})</strong>${f.gait_belt ? ' <span class="status-badge">belt</span>' : ''}<br><span style="color:var(--ink-600);">${escapeHtml(f.predicted_gait_deficit)}</span></div>`).join('')}` : ''}
+        ${r.notes ? `<h4 class="mt-16">Notes</h4><p style="font-size:.9rem;">${escapeHtml(r.notes)}</p>` : ''}
+        <p class="mt-8" style="font-size:.78rem; color:var(--ink-600);">Screening indicator only — interpret alongside certified examination (engine audit: items ${pay.items_recorded}/${pay.items_expected}).</p>`;
+    } else if (r.scale_type === 'tug') {
+      html += `<div class="tags mt-16">
+          <span class="status-badge status-confirmed">${pay.seconds} s</span>
+          <span class="status-badge">${escapeHtml(pay.population_label || '')} cutoff ${pay.interpretation ? pay.interpretation.cutoff_s : ''} s — ${pay.fallback_risk ? 'RISK FLAGGED' : 'not flagged'}</span>
+        </div>
+        <p class="mt-8" style="font-size:.9rem;">${escapeHtml(pay.interpretation ? pay.interpretation.text : '')}</p>
+        ${(pay.observations || []).length ? `<h4 class="mt-16">Observations</h4><p style="font-size:.9rem;">${pay.observations.map(escapeHtml).join(' · ')}</p>` : ''}`;
+    } else if (r.scale_type === 'gmfcs') {
+      html += `<div class="tags mt-16">
+          <span class="status-badge status-confirmed">Level ${escapeHtml(pay.level || '?')} — ${escapeHtml(pay.level_title || '')}</span>
+          <span class="status-badge">${escapeHtml(pay.age_label || '')}</span>
+        </div>
+        <p class="mt-8" style="font-size:.85rem; color:var(--ink-600);">Classification of usual performance — not a diagnosis, not a change detector (SOURCES.md R9/R10).</p>`;
+    } else if (r.scale_type === 'oga') {
+      const entries = (pay.entries || []).map(e => `<div class="mt-8" style="font-size:.9rem;">• <strong>${escapeHtml(e.segment)}</strong> — ${escapeHtml(e.deviation)} <span style="color:var(--ink-600);">(${escapeHtml(e.phase)}, ${escapeHtml(e.side)})</span></div>`).join('');
+      html += `<p class="mt-16" style="font-size:.85rem; color:var(--ink-600);">${escapeHtml(pay.method || '')} — ${escapeHtml(pay.acronym || '')}</p>${entries}`;
+    }
+    body.innerHTML = html;
+  } catch (err) {
+    body.innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
+  }
 }

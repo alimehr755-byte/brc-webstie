@@ -312,8 +312,29 @@ async function runAnalyzer(session) {
       '--frontal', resolveVideo(session.frontal_video), '--sagittal', resolveVideo(session.sagittal_video),
       '--combined', resolveVideo(session.combined_video),
       '--artifacts', artifactsAbsDir, '--out', outFile,
-      '--height-cm', String(session.height_cm ?? ''),
-      '--speed-hint', String(session.speed_hint || 'auto')];
+    '--height-cm', String(session.height_cm ?? ''),
+    '--speed-hint', String(session.speed_hint || 'auto')];
+
+    // Phase D — pass pediatric norms + GMFCS context through to the engine.
+    // GMFCS comes from the latest stored clinical record (zero-assumption:
+    // when absent the flag is omitted entirely and the report says nothing).
+    if (session.age_years != null) args.push('--age-years', String(session.age_years));
+    if (session.gender) args.push('--gender', String(session.gender));
+    try {
+      const gmfcsRow = db.prepare(
+        "SELECT payload FROM clinical_scales WHERE user_id = ? AND scale_type = 'gmfcs' AND status IN ('assessed','reviewed') ORDER BY created_at DESC LIMIT 1"
+      ).get(session.user_id);
+      if (gmfcsRow && gmfcsRow.payload) {
+        const gp = JSON.parse(gmfcsRow.payload);
+        if (gp && gp.level) {
+          args.push('--context', JSON.stringify({
+            gmfcs: { level: gp.level, age_label: gp.age_label || null,
+                     reported_via: gp.reported_via || null,
+                     source: 'clinical_scales record (Palisano 1997/2007, CanChild McMaster)' },
+          }));
+        }
+      }
+    } catch (e) { /* context is optional; never block analysis on it */ }
 
     // Long timeout: real pose estimation is compute heavy (MediaPipe on CPU +
     // overlay video encoding + matplotlib graphs). Default 45 min; overridable
@@ -1137,6 +1158,143 @@ function needReportData(req, res) {
   return { row, user };
 }
 
+// ===========================================================================
+// Functional Assessment appendix (clinical scales × gait cross-validation)
+// --------------------------------------------------------------------------
+// Reads the patient's latest stored scale records (python/bbs_engine.py +
+// scales_registry.py produced every payload — this file only resolves the
+// deep parameter paths into the session's canonical results JSON) and builds
+// the BBS <-> kinematics cross-validation table, per spec P1: a cross-check
+// is 'assessed' only when BOTH the predicted-deficit parameter path exists
+// in this session's results and the BBS item was scored; otherwise it is
+// rendered as 'unassessed', never inferred.
+// ===========================================================================
+const SCALE_TYPES_APP = ['bbs', 'tug', 'gmfcs', 'oga'];
+const SCALE_LABELS_MAP = { bbs: 'Berg Balance Scale', tug: 'Timed Up & Go', gmfcs: 'GMFCS-E&R', oga: 'Observational Gait Analysis (Rancho Los Amigos)' };
+
+function loadScalesForReport(userId) {
+  const out = {};
+  for (const st of SCALE_TYPES_APP) {
+    const rowDb = db.prepare(
+      "SELECT * FROM clinical_scales WHERE user_id = ? AND scale_type = ? AND status IN ('assessed','reviewed') ORDER BY created_at DESC LIMIT 1"
+    ).get(userId, st);
+    if (rowDb) out[st] = { ...rowDb, items: safeJson(rowDb.items), payload: safeJson(rowDb.payload) };
+  }
+  return out;
+}
+
+function crosscheckBbsGait(scales, results) {
+  const bbs = scales.bbs;
+  if (!bbs || !bbs.payload) return [];
+  const curves = [];
+  for (const flag of (bbs.payload.gait_impact_flags || [])) {
+    const paths = flag.crosscheck_params;
+    if (!paths) {
+      curves.push({ bbs_item: flag.item, task: flag.task, bbs_score: flag.score,
+        predicted_deficit: flag.predicted_gait_deficit, status: 'unassessed',
+        reason: 'Not observable by 2D markerless video gait analysis.' });
+      continue;
+    }
+    const observed = [];
+    let anyFound = false;
+    for (const p of paths) {
+      let val = results, pathStr = [];
+      let found = null;
+      pathStr = p;
+      for (const key of p) {
+        if (val && typeof val === 'object' && Object.prototype.hasOwnProperty.call(val, key)) {
+          val = val[key];
+        } else { val = undefined; break; }
+      }
+      if (val !== undefined && val !== null) { anyFound = true; found = val; }
+      observed.push({ param: p.join('.'), value: found == null ? null : found });
+    }
+    curves.push({ bbs_item: flag.item, task: flag.task, bbs_score: flag.score,
+      predicted_deficit: flag.predicted_gait_deficit, status: anyFound ? 'assessed' : 'unassessed',
+      observed_params: observed,
+      reason: anyFound ? null : 'No supporting gait-analysis parameter present in this session (P1: withheld, not inferred).' });
+  }
+  return curves;
+}
+
+// Renders the appendix into the PDFKit document `doc`.
+function addFunctionalAssessmentPdf(doc, scales, crosscheck) {
+  const anyScale = SCALE_TYPES_APP.some(st => scales[st]);
+  if (!anyScale && !crosscheck.length) return;
+  doc.moveDown(0.8);
+  doc.rect(50, doc.y, 495, 2).fill('#C99436');
+  doc.moveDown(0.4);
+  doc.fontSize(13).fillColor('#1E3C82').text('Functional Assessment (Clinical Scales)');
+  doc.moveDown(0.3);
+  doc.fontSize(7.5).fillColor('#5A5D55').text('Scores by the offline BRC scale engines (python/bbs_engine.py, scales_registry.py). Interpretations carry their evidence citations from docs/references/SOURCES.md. Screening indicators only — not diagnoses.', { width: 495 });
+  doc.moveDown(0.3);
+
+  if (scales.bbs && scales.bbs.payload) {
+    const p = scales.bbs.payload;
+    doc.fontSize(10).fillColor('#1E3C82').text(`Berg Balance Scale — ${p.total_score}/56 (${p.items_recorded}/${p.items_expected} items scored)`);
+    doc.moveDown(0.2);
+    if (p.mobility_band) {
+      doc.fontSize(9).fillColor('#232520').text(`Mobility band: ${p.mobility_band.level} — ${p.mobility_band.recommendation}`);
+    }
+    if (p.fall_screen) {
+      doc.fontSize(9).fillColor(p.fall_screen.risk_flagged ? '#B3452F' : '#2F7A4D')
+        .text(`Fall screen (${p.fall_screen.population_label}): ${p.fall_screen.risk_flagged ? 'FLAGGED' : 'not flagged'} at cutoff ${p.fall_screen.cutoff}.`);
+      doc.fontSize(7.8).fillColor('#5A5D55').text(p.fall_screen.text, { width: 495 });
+    }
+    doc.moveDown(0.2);
+  }
+  if (scales.tug && scales.tug.payload) {
+    const p = scales.tug.payload;
+    doc.fontSize(10).fillColor('#1E3C82').text(`Timed Up & Go — ${p.seconds} s (${p.population_label})`);
+    doc.moveDown(0.2);
+    if (p.interpretation) {
+      doc.fontSize(9).fillColor(p.fallback_risk ? '#B3452F' : '#2F7A4D').text(p.interpretation.text, { width: 495 });
+    }
+    if ((p.observations || []).length) doc.fontSize(8).fillColor('#5A5D55').text(`Observations: ${p.observations.join(', ')}`, { width: 495 });
+    doc.moveDown(0.2);
+  }
+  if (scales.gmfcs && scales.gmfcs.payload && scales.gmfcs.payload.level) {
+    const p = scales.gmfcs.payload;
+    doc.fontSize(10).fillColor('#1E3C82').text(`GMFCS-E&R — Level ${p.level} (${p.age_label || 'age band not recorded'})`);
+    doc.moveDown(0.2);
+    doc.fontSize(9).fillColor('#232520').text(p.interpretation.text);
+    doc.fontSize(7.8).fillColor('#5A5D55').text('Classification of usual performance — distinguishes functional limitation, not diagnosis; not a change-over-time outcome measure (Palisano 1997/2007, CanChild McMaster).', { width: 495 });
+    doc.moveDown(0.2);
+  }
+  if (scales.oga && scales.oga.payload) {
+    const p = scales.oga.payload;
+    const n = (p.entries || []).length;
+    doc.fontSize(10).fillColor('#1E3C82').text(`Observational Gait Analysis (Rancho Los Amigos) — ${n} deviation${n === 1 ? '' : 's'} recorded`);
+    doc.moveDown(0.2);
+    (p.entries || []).slice(0, 12).forEach(e => {
+      doc.fontSize(8.5).fillColor('#232520').text(`• ${e.segment} — ${e.deviation} (${e.phase}, ${e.side})`, { width: 495 });
+    });
+    if (n > 12) doc.fontSize(7.8).fillColor('#5A5D55').text(`…and ${n - 12} more.`, { width: 495 });
+    doc.moveDown(0.2);
+  }
+
+  if (crosscheck.length) {
+    doc.moveDown(0.4);
+    doc.fontSize(10).fillColor('#1E3C82').text('BBS × Gait Analysis Cross-Validation');
+    doc.moveDown(0.2);
+    doc.fontSize(7.8).fillColor('#5A5D55').text('Predicted deficits from low-scoring BBS items (≤2) check against the objective engine measurements for this session. A cross-check is assessed only when both sides exist; otherwise it is withheld (zero-assumption protocol).', { width: 495 });
+    doc.moveDown(0.3);
+    crosscheck.forEach(c => {
+      doc.fontSize(9).fillColor('#232520').text(
+        `Item ${c.bbs_item} — ${c.task} (${c.bbs_score}/4): ${c.predicted_deficit}`,
+        { width: 495 });
+      if (c.status === 'assessed') {
+        c.observed_params.forEach(o => doc.fontSize(8).fillColor(o.value != null ? '#2F7A4D' : '#5A5D55')
+          .text(`   ${o.param} = ${o.value != null ? o.value : 'unmeasured'}`, { width: 480 }));
+      } else {
+        doc.fontSize(8).fillColor('#B3452F')
+          .text(`   UNASSESSED — ${c.reason}`, { width: 480 });
+      }
+      doc.moveDown(0.15);
+    });
+  }
+}
+
 router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   const ctx = needReportData(req, res);
   if (!ctx) return;
@@ -1592,6 +1750,11 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
     });
   });
 
+  // ---- functional assessment appendix (clinical scales × gait) ----
+  const reportScales = loadScalesForReport(row.user_id);
+  const reportCrosscheck = crosscheckBbsGait(reportScales, r);
+  addFunctionalAssessmentPdf(doc, reportScales, reportCrosscheck);
+
   addFooters(doc);
   doc.end();
 });
@@ -1993,6 +2156,62 @@ router.get('/sessions/:id/report.docx', requireAuth, async (req, res) => {
     });
   });
 
+  // Functional assessment appendix (clinical scales × gait)
+  const reportScales = loadScalesForReport(row.user_id);
+  const reportCrosscheck = crosscheckBbsGait(reportScales, r);
+  if (reportScales.bbs || reportScales.tug || reportScales.gmfcs || reportScales.oga || reportCrosscheck.length) {
+    children.push(new Paragraph({ text: 'Functional Assessment (Clinical Scales)', heading: HeadingLevel.HEADING_1, spacing: { before: 400 } }));
+    children.push(new Paragraph({ text: 'Scores by the offline BRC scale engines. Interpretations carry their evidence citations from docs/references/SOURCES.md. Screening indicators only — not diagnoses.', italics: true, color: '666666', size: 16 }));
+    if (reportScales.bbs && reportScales.bbs.payload) {
+      const p = (reportScales.bbs.payload);
+      const converted = [new Paragraph({ text: `Berg Balance Scale — ${p.total_score}/56 (${p.items_recorded}/${p.items_expected} items scored)`, heading: HeadingLevel.HEADING_2, spacing: { before: 200 } })];
+      if (p.mobility_band) {
+        converted.push(new Paragraph({ text: `Mobility band: ${p.mobility_band.level} — ${p.mobility_band.recommendation}`, size: 18 }));
+      }
+      if (p.fall_screen) {
+        converted.push(new Paragraph({ text: `Fall screen (${p.fall_screen.population_label}): ${p.fall_screen.risk_flagged ? 'FLAGGED' : 'not flagged'} at cutoff ${p.fall_screen.cutoff}.`, size: 18, color: p.fall_screen.risk_flagged ? 'B3452F' : '2F7A4D' }));
+        converted.push(new Paragraph({ text: p.fall_screen.text, color: '666666', size: 16 }));
+      }
+      children.push(...converted);
+    }
+    if (reportScales.tug && reportScales.tug.payload) {
+      const p = reportScales.tug.payload;
+      children.push(new Paragraph({ text: `Timed Up & Go — ${p.seconds} s (${p.population_label})`, heading: HeadingLevel.HEADING_2, spacing: { before: 200 } }));
+      if (p.interpretation) {
+        children.push(new Paragraph({ text: p.interpretation.text, size: 18, color: p.fallback_risk ? 'B3452F' : '2F7A4D' }));
+      }
+      if ((p.observations || []).length) children.push(new Paragraph({ text: `Observations: ${p.observations.join(', ')}`, color: '666666', size: 16 }));
+    }
+    if (reportScales.gmfcs && reportScales.gmfcs.payload && reportScales.gmfcs.payload.level) {
+      const p = reportScales.gmfcs.payload;
+      children.push(new Paragraph({ text: `GMFCS-E&R — Level ${p.level} (${p.age_label || 'age band not recorded'})`, heading: HeadingLevel.HEADING_2, spacing: { before: 200 } }));
+      children.push(new Paragraph({ text: String(p.interpretation.text), size: 18 }));
+      children.push(new Paragraph({ text: 'Classification of usual performance — distinguishes functional limitation, not diagnosis; not a change-over-time outcome measure (Palisano 1997/2007, CanChild McMaster).', color: '666666', size: 16 }));
+    }
+    if (reportScales.oga && reportScales.oga.payload) {
+      const p = reportScales.oga.payload;
+      const n = (p.entries || []).length;
+      children.push(new Paragraph({ text: `Observational Gait Analysis (Rancho Los Amigos) — ${n} deviation${n === 1 ? '' : 's'} recorded`, heading: HeadingLevel.HEADING_2, spacing: { before: 200 } }));
+      (p.entries || []).slice(0, 12).forEach(e => {
+        children.push(new Paragraph({ text: `• ${e.segment} — ${e.deviation} (${e.phase}, ${e.side})`, size: 18, indent: { left: 240 } }));
+      });
+      if (n > 12) children.push(new Paragraph({ text: `…and ${n - 12} more.`, color: '666666', size: 16 }));
+    }
+    if (reportCrosscheck.length) {
+      children.push(new Paragraph({ text: 'BBS × Gait Analysis Cross-Validation', heading: HeadingLevel.HEADING_2, spacing: { before: 240 } }));
+      children.push(new Paragraph({ text: 'Predicted deficits from low-scoring BBS items (≤2) are checked against objective engine measurements for this session. A cross-check is assessed only when both sides exist; otherwise it is withheld (zero-assumption protocol).', italics: true, color: '666666', size: 16 }));
+      reportCrosscheck.forEach(c => {
+        children.push(new Paragraph({ text: `Item ${c.bbs_item} — ${c.task} (${c.bbs_score}/4): ${c.predicted_deficit}`, bold: true, spacing: { before: 120 } }));
+        if (c.status === 'assessed') {
+          c.observed_params.forEach(o => {
+            children.push(new Paragraph({ text: `${o.param} = ${o.value != null ? o.value : 'unmeasured'}`, color: o.value != null ? '2F7A4D' : '666666', size: 16, indent: { left: 360 } }));
+          });
+        } else {
+          children.push(new Paragraph({ text: `UNASSESSED — ${c.reason}`, color: 'B3452F', size: 16, indent: { left: 360 } }));
+        }
+      });
+    }
+  }
   const doc = new Document({
     sections: [{
       children,

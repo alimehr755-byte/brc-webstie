@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadAppointments();
   loadAssessmentStatus();
   loadGaitStatus();
+  loadScalesStatus();
   setupOtherToggle();
   setupBookingForm();
 });
@@ -181,6 +182,39 @@ async function loadGaitStatus() {
     }
   } catch (err) {
     // leave default state
+  }
+}
+
+async function loadScalesStatus() {
+  const textEl = document.getElementById('scales-status-text');
+  const wrap = document.getElementById('scales-summary');
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) return;
+    const { user } = await res.json();
+    const res2 = await fetch(`/api/scales/patient/${user.id}`);
+    if (!res2.ok) return;
+    const { records } = await res2.json();
+    const assessed = (records || []).filter(r => r.status === 'assessed' || r.status === 'reviewed');
+    if (!assessed.length) return; // keep default state
+    textEl.textContent = 'Your child\'s latest recorded assessments:';
+    // keep only the newest record per scale type (dash reads plain-language; full
+    // interpretation lives in the exported clinical reports)
+    const latest = {};
+    assessed.forEach(r => { if (!latest[r.scale_type]) latest[r.scale_type] = r; });
+    const LABELS = { bbs: 'Balance', tug: 'Mobility (TUG)', gmfcs: 'GMFCS level', oga: 'Gait observation' };
+    wrap.innerHTML = Object.entries(latest).map(([type, r]) => {
+      const pay = r.payload || {};
+      let detail = '';
+      if (type === 'bbs' && pay.total_score != null) detail = `${pay.total_score}/56 — ${pay.mobility_band ? pay.mobility_band.level : ''}`;
+      else if (type === 'tug' && pay.seconds != null) detail = `${pay.seconds} s ${pay.fallback_risk ? '· flagged' : ''}`;
+      else if (type === 'gmfcs' && pay.level) detail = `Level ${pay.level}`;
+      else if (type === 'oga') detail = `${pay.entries ? pay.entries.length : 0} observations`;
+      else detail = r.total != null ? String(r.total) : '';
+      return `<span class="status-badge status-confirmed">${LABELS[type] || type}: ${detail}</span>`;
+    }).join(' ');
+  } catch (err) {
+    // keep default state
   }
 }
 

@@ -211,4 +211,39 @@ if (!gaitCols.includes('clinician_name')) {
   try { db.exec("ALTER TABLE gait_sessions ADD COLUMN clinician_name TEXT"); } catch (e) { /* ignore */ }
 }
 
+// ---- CLINICAL SCALES TABLE ----
+// Structured functional-assessment records, one row per administered scale
+// (BBS 14-item, TUG, GMFCS-E&R observational, digital Rancho OGA, plus
+// future-ready stubs). All interpretation/cutoff logic lives in the Python
+// engine (python/bbs_engine.py, python/scales_registry.py); this table only
+// persists what the engine returned. `items` holds the engine's itemized
+// payload; `payload` holds the full normalized engine output so reports and
+// views can trace every interpretation back to its citation.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS clinical_scales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    scale_type TEXT NOT NULL CHECK(scale_type IN ('bbs','tug','gmfcs','oga','6mwt','2mwt','10mwt','fac','tinetti','dgi','fap','iowa_loa')),
+    status TEXT NOT NULL DEFAULT 'assessed' CHECK(status IN ('assessed','unassessed','stub','reviewed')),
+    items TEXT,
+    payload TEXT NOT NULL DEFAULT '{}',
+    total REAL,
+    interpretation TEXT,
+    assessor TEXT,
+    notes TEXT,
+    related_session_id INTEGER,
+    created_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (related_session_id) REFERENCES gait_sessions(id),
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  )
+`);
+
+const scaleCols = db.prepare('PRAGMA table_info(clinical_scales)').all().map(c => c.name);
+if (!scaleCols.includes('related_session_id')) {
+  try { db.exec('ALTER TABLE clinical_scales ADD COLUMN related_session_id INTEGER'); } catch (e) { /* ignore */ }
+}
+
 module.exports = db;
