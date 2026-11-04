@@ -200,6 +200,13 @@ if (!gaitCols.includes('third_video')) {
 if (!gaitCols.includes('third_name')) {
   try { db.exec('ALTER TABLE gait_sessions ADD COLUMN third_name TEXT'); } catch (e) { /* ignore */ }
 }
+// 2.md + Phase 1 — golden session flag. A session is marked golden after the
+// treating physiotherapist has completed manual assessment (goniometry, CP
+// knee pattern, BBS, TUG, GMFCS) per docs/capture-sop.md. The concordance
+// harness reads these rows to compute engine-vs-physio agreement gates.
+if (!gaitCols.includes('is_golden')) {
+  try { db.exec("ALTER TABLE gait_sessions ADD COLUMN is_golden INTEGER DEFAULT 0"); } catch (e) { /* ignore */ }
+}
 if (!gaitCols.includes('speed_hint')) {
   try { db.exec("ALTER TABLE gait_sessions ADD COLUMN speed_hint TEXT DEFAULT 'auto'"); } catch (e) { /* ignore */ }
 }

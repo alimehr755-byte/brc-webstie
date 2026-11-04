@@ -1052,6 +1052,23 @@ router.patch('/admin/sessions/:id/review', requireAdmin, (req, res) => {
   res.json({ success: true, message: 'Session reviewed.' });
 });
 
+// Admin: mark/unmark a session as golden for the engine-vs-physio concordance
+// harness (Phase 1). A golden session has a completed physiotherapist manual
+// assessment per docs/capture-sop.md. Body: { golden: boolean }.
+router.patch('/admin/sessions/:id/golden', requireAdmin, (req, res) => {
+  const row = loadSession(req, res);
+  if (!row) return;
+  if (row.status !== 'analyzed') {
+    return res.status(400).json({ error: 'Only analyzed sessions can be marked golden.' });
+  }
+  const golden = Boolean(req.body && req.body.golden);
+  db.prepare('UPDATE gait_sessions SET is_golden = ?, updated_at = datetime(\'now\') WHERE id = ?')
+    .run(golden ? 1 : 0, row.id);
+  auditGait(req, golden ? 'gait_golden_mark' : 'gait_golden_unmark', 'gait', row.id,
+    `Marked session #${row.id} ${golden ? 'golden' : 'not golden'}`);
+  res.json({ success: true, message: `Session #${row.id} ${golden ? 'marked golden' : 'unmarked golden'}.`, golden });
+});
+
 // Admin: apply manual clinician edits to a session's stored results and re-persist
 // the JSON so the patient view and PDF/DOCX reports reflect the final version.
 // Body shape: { result: { ...patched results object } } — the caller submits the

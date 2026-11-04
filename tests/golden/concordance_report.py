@@ -2,12 +2,14 @@
 # tests/golden/concordance_report.py
 # Auto-generates an engine-vs-physio concordance report from golden sessions.
 #
+# Golden sessions are discovered from the SQLite DB (gait_sessions.is_golden = 1,
+# set via the admin PATCH /api/gait/admin/sessions/:id/golden route or
+# scripts/mark-golden.py). Physio ground-truth columns are merged from
+# tests/golden/golden_dataset.csv joined on session_id. Engine results are read
+# from uploads/gait/analysis-<session_id>.json.
+#
 # Usage:
 #   python tests/golden/concordance_report.py [--out tests/golden/concordance_report.html]
-#
-# Reads:
-#   tests/golden/golden_dataset.csv          (physio ground truth)
-#   uploads/gait/analysis-<session_id>.json  (engine results)
 #
 # Writes:
 #   <out>                                     (HTML report)
@@ -20,7 +22,9 @@
 import argparse
 import csv
 import json
+import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -28,9 +32,52 @@ ROOT = HERE.parent.parent
 GOLDEN_CSV = HERE / "golden_dataset.csv"
 UPLOADS_DIR = ROOT / "uploads" / "gait"
 SUMMARY_JSON = HERE / "concordance_summary.json"
+DEFAULT_DB = ROOT / "db" / "brc.db"
 
 MAE_KNEE_STANCE_DEG = 8.0
 PATTERN_AGREEMENT_MIN = 0.80
+
+
+def _db_path():
+    # Resolve the SQLite DB the same way db/database.js does (repo/db/brc.db),
+    # with a few fallbacks.
+    candidates = [DEFAULT_DB, ROOT / "brc.db", ROOT / "uploads" / "brc.db", ROOT / "database.db"]
+    for p in candidates:
+        if p.exists():
+            return p
+    return DEFAULT_DB
+
+
+def _load_golden_sessions_from_db():
+    """Return list of dicts {session_id, user_id, status} for is_golden=1 rows."""
+    db_path = _db_path()
+    if not db_path.exists():
+        return []
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT id AS session_id, user_id, status FROM gait_sessions WHERE is_golden = 1 ORDER BY id"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # is_golden column may not exist yet on older DBs
+        return []
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def _load_csv_physio():
+    """Return dict {session_id: row} from golden_dataset.csv."""
+    if not GOLDEN_CSV.exists():
+        return {}
+    out = {}
+    with open(GOLDEN_CSV, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            sid = (row.get("session_id") or "").strip()
+            if sid:
+                out[sid] = row
+    return out
 
 
 def _engine_result(session_id):
@@ -76,25 +123,25 @@ def _engine_cp_pattern(result):
     return pats[0]
 
 
-def _build_report():
-    rows = []
-    if GOLDEN_CSV.exists():
-        with open(GOLDEN_CSV, newline="", encoding="utf-8") as fh:
-            rows = list(csv.DictReader(fh))
+def _build_report(db_path_override=None):
+    golden_sessions = _load_golden_sessions_from_db()
+    csv_physio = _load_csv_physio()
 
     sessions = []
     errs = []
     pattern_assessed = 0
     pattern_agrees = 0
+    results_by_sid = {}
 
-    for row in rows:
-        sid = (row.get("session_id") or "").strip()
-        if not sid:
-            continue
+    for gs in golden_sessions:
+        sid = str(gs["session_id"])
         engine = _engine_result(sid)
+        results_by_sid[sid] = engine
+        physio_row = csv_physio.get(sid, {})
+
         side_rows = []
         for side in ("L", "R"):
-            physio_stance_raw = (row.get(f"knee_flex_stance_{side}_deg") or "").strip()
+            physio_stance_raw = (physio_row.get(f"knee_flex_stance_{side}_deg") or "").strip()
             eng = _engine_knee_flexion(engine, side)
             physio_stance = None
             if physio_stance_raw:
@@ -116,7 +163,7 @@ def _build_report():
                 "status": status,
             })
 
-        physio_pat = (row.get("cp_knee_pattern") or "").strip().lower() or None
+        physio_pat = (physio_row.get("cp_knee_pattern") or "").strip().lower() or None
         engine_pat = _engine_cp_pattern(engine)
         pat_agree = None
         pat_status = "unassessed"
@@ -127,15 +174,19 @@ def _build_report():
             if pat_agree:
                 pattern_agrees += 1
 
-        mae = (sum(e for e in errs) / len(errs)) if errs else None
+        session_errs = [r["abs_err_deg"] for r in side_rows if r["abs_err_deg"] is not None]
+        session_mae = round(sum(session_errs) / len(session_errs), 1) if session_errs else None
+
         sessions.append({
             "session_id": sid,
-            "patient_id": row.get("patient_id", ""),
-            "age_years": row.get("age_years", ""),
-            "diagnosis": row.get("diagnosis", ""),
+            "user_id": gs.get("user_id"),
+            "db_status": gs.get("status"),
+            "patient_id": physio_row.get("patient_id", ""),
+            "age_years": physio_row.get("age_years", ""),
+            "diagnosis": physio_row.get("diagnosis", ""),
             "engine_status": (engine or {}).get("mode", "missing") if engine else "missing",
             "sides": side_rows,
-            "session_mae_deg": round(mae, 1) if mae is not None else None,
+            "session_mae_deg": session_mae,
             "pattern_physio": physio_pat,
             "pattern_engine": engine_pat,
             "pattern_agree": pat_agree,
@@ -146,21 +197,19 @@ def _build_report():
     overall_pattern_agree = round(pattern_agrees / pattern_assessed, 3) if pattern_assessed else None
 
     summary = {
-        "generated_at": __import__("datetime").datetime.now().isoformat(),
+        "generated_at": datetime.now().isoformat(),
         "golden_sessions": len(sessions),
         "assessed_knee_sides": len(errs),
         "overall_mae_knee_stance_deg": overall_mae,
         "mae_gate_deg": MAE_KNEE_STANCE_DEG,
-        "mae_pass": (overall_mae is not None and overall_mae <= MAE_KNEE_STANCE_DEG),
+        "mae_pass": None if overall_mae is None else (overall_mae <= MAE_KNEE_STANCE_DEG),
         "assessed_pattern_sessions": pattern_assessed,
         "pattern_agreement": overall_pattern_agree,
         "pattern_agreement_gate": PATTERN_AGREEMENT_MIN,
-        "pattern_pass": (
-            overall_pattern_agree is not None and overall_pattern_agree >= PATTERN_AGREEMENT_MIN
-        ),
+        "pattern_pass": None if overall_pattern_agree is None else (overall_pattern_agree >= PATTERN_AGREEMENT_MIN),
         "sessions": sessions,
     }
-    return summary
+    return summary, results_by_sid
 
 
 def _html(summary):
@@ -170,7 +219,7 @@ def _html(summary):
         side_html = ""
         for sd in s["sides"]:
             err = sd["abs_err_deg"]
-            err_txt = f"{err}°" if err is not None else "—"
+            err_txt = f"{err} deg" if err is not None else "—"
             side_html += (
                 f"<tr><td>{esc(sd['side'])}</td>"
                 f"<td>{sd['physio_stance_deg'] if sd['physio_stance_deg'] is not None else '—'}</td>"
@@ -222,8 +271,8 @@ tr:nth-child(even){{background:#fbfdfe;}}
 <h1>BRC Gait Lab — Engine vs Physio Concordance</h1>
 <p class="sub">Generated {esc(summary['generated_at'])} &nbsp;·&nbsp; {summary['golden_sessions']} golden session(s)</p>
 <div class="kpi">
-  <div><div class="l">Overall knee-stance MAE</div><div class="v">{summary['overall_mae_knee_stance_deg'] if summary['overall_mae_knee_stance_deg'] is not None else '—'}°</div><div class="note">Gate ≤ {summary['mae_gate_deg']}° · <span class="{'pass' if summary['mae_pass'] is True else ('fail' if summary['mae_pass'] is False else 'na')}">{mae_pass_txt}</span></div></div>
-  <div><div class="l">CP pattern agreement</div><div class="v">{summary['pattern_agreement'] if summary['pattern_agreement'] is not None else '—'}</div><div class="note">Gate ≥ {int(summary['pattern_agreement_gate']*100)}% · <span class="{'pass' if summary['pattern_pass'] is True else ('fail' if summary['pattern_pass'] is False else 'na')}">{pat_pass_txt}</span></div></div>
+  <div><div class="l">Overall knee-stance MAE</div><div class="v">{summary['overall_mae_knee_stance_deg'] if summary['overall_mae_knee_stance_deg'] is not None else '—'} deg</div><div class="note">Gate &lt;= {summary['mae_gate_deg']} deg · <span class="{'pass' if summary['mae_pass'] is True else ('fail' if summary['mae_pass'] is False else 'na')}">{mae_pass_txt}</span></div></div>
+  <div><div class="l">CP pattern agreement</div><div class="v">{summary['pattern_agreement'] if summary['pattern_agreement'] is not None else '—'}</div><div class="note">Gate &gt;= {int(summary['pattern_agreement_gate']*100)}% · <span class="{'pass' if summary['pattern_pass'] is True else ('fail' if summary['pattern_pass'] is False else 'na')}">{pat_pass_txt}</span></div></div>
   <div><div class="l">Assessed knee sides</div><div class="v">{summary['assessed_knee_sides']}</div><div class="note">of {summary['golden_sessions']*2} possible</div></div>
   <div><div class="l">Assessed pattern sessions</div><div class="v">{summary['assessed_pattern_sessions']}</div><div class="note">of {summary['golden_sessions']} possible</div></div>
 </div>
@@ -243,7 +292,7 @@ def main():
                     help="HTML output path")
     ns = ap.parse_args()
 
-    summary = _build_report()
+    summary, _ = _build_report()
     SUMMARY_JSON.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     Path(ns.out).write_text(_html(summary), encoding="utf-8")
 
