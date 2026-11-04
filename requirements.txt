@@ -1,6 +1,14 @@
-numpy
-pandas
-scipy
-matplotlib
-opencv-python-headless
-mediapipe
+# BRC Gait Lab — pinned Python dependencies (direct imports only)
+# Transitive deps resolved by pip at install time.
+# pose2sim is a local module (not on PyPI); python/gait_lab.py imports it from ./python.
+opencv-python==5.0.0.93
+matplotlib==3.11.1
+mediapipe==0.10.35
+numpy==2.3.1
+pandas==2.3.1
+scipy==1.18.0
+smplx==0.1.28
+torch==2.14.0+cpu
+rapidocr-onnxruntime==1.2.3
+Pillow==12.3.0
+PyYAML==6.0.3

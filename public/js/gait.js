@@ -1680,6 +1680,7 @@ function renderCurrentView() {
   if (window.Chart) window.requestAnimationFrame(() => buildGaitCharts());
   setupOCRPanel(s);
   setupRawJsonSection(s);
+  bindSmplxViewport(s);
   const vm = window.__viewMatrix;
   const secFor = (id) => !vm || !vm.sectionViews || !vm.sectionViews[id] || vm.sectionViews[id].indexOf(activeViewId) !== -1;
   if (secFor('progression')) loadProgression(s);
@@ -2297,11 +2298,177 @@ function renderReport(s) {
     ${refsHtml}
   `);
 
+  // 2.md — SMPL-X rotatable 3D mesh viewport. Only rendered when SMPL-X fitting
+  // produced assessed frames (zero-assumption: nothing shown otherwise).
+  const smplx = r.smplx || {};
+  if (smplx.status === 'assessed' && smplx.frames && smplx.frames.length) {
+    const objFile = (smplx.frames[0].obj_path || '').replace(/\\/g, '/').split('/').pop();
+    const objUrl = objFile ? `/api/gait/sessions/${s.id}/artifacts/${encodeURIComponent(objFile)}` : '';
+    const framesJson = JSON.stringify(smplx.frames.map(f => ({
+      frame: f.frame,
+      obj: (f.obj_path || '').replace(/\\/g, '/').split('/').pop()
+    })));
+    always(`
+      <div class="mt-24">
+        <h4 style="border-top:2px solid #E1EEF8; padding-top:16px;">3D Mesh Viewport (SMPL-X)</h4>
+        <p style="font-size:.85rem; color:var(--ink-600); margin-top:6px;">Rotatable, frame-scrubbable SMPL-X mesh fitted to the third (Coronal) plane keypoints.</p>
+        <div id="smplx-viewport" style="width:100%; max-width:700px; height:500px; border:1px solid #E1EEF8; border-radius:12px; background:#0e1b14; margin-top:10px; position:relative;"></div>
+        <div class="mt-12" style="display:flex; align-items:center; gap:10px;">
+          <label style="font-size:.78rem; color:var(--ink-600);">Frame</label>
+          <input type="range" id="smplx-frame-slider" min="0" max="${smplx.frames.length-1}" value="0" style="flex:1;">
+          <span id="smplx-frame-label" style="font-size:.78rem; color:var(--ink-600); min-width:40px;">Frame 0 / ${smplx.frames.length}</span>
+        </div>
+        <p style="font-size:.78rem; color:var(--ink-500); margin-top:6px;">Drag to rotate · scroll to zoom · slider to scrub frames</p>
+      </div>
+    `);
+  }
+
   put('downloads', bottomSectionHtml);
 
   return sections.join('\n');
 }
 
+
+// 2.md — SMPL-X rotatable 3D mesh viewport. Loads per-frame .obj meshes from the
+// artifact server and lets the clinician scrub frames + orbit the mesh.
+// Zero-assumption: no-op when no viewport div or no frames.
+function bindSmplxViewport(s) {
+  const el = document.getElementById('smplx-viewport');
+  if (!el || typeof THREE === 'undefined') return;
+  const smplx = (s && s.results && s.results.smplx) || {};
+  if (smplx.status !== 'assessed' || !smplx.frames || !smplx.frames.length) return;
+
+  const frames = smplx.frames.map(f => ({
+    frame: f.frame,
+    obj: (f.obj_path || '').replace(/\\/g, '/').split('/').pop()
+  }));
+  const slider = document.getElementById('smplx-frame-slider');
+  const label = document.getElementById('smplx-frame-label');
+  if (slider) {
+    slider.max = frames.length - 1;
+    slider.value = 0;
+  }
+  if (label) label.textContent = `Frame 0 / ${frames.length}`;
+
+  let scene, camera, renderer, mesh, orbit = { theta: 0, phi: 1.0, dist: 2.5 };
+  let geoCache = {}; // obj filename -> BufferGeometry
+
+  function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0e1b14);
+    camera = new THREE.PerspectiveCamera(45, el.clientWidth / Math.max(el.clientHeight, 1), 0.1, 100);
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(el.clientWidth, el.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    el.appendChild(renderer.domElement);
+
+    // Lighting
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambient);
+    const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+    dir.position.set(2, 4, 3);
+    scene.add(dir);
+
+    // Grid floor
+    const grid = new THREE.GridHelper(10, 20, 0x444444, 0x222222);
+    scene.add(grid);
+
+    // Events
+    let isDown = false, lastX = 0, lastY = 0;
+    el.addEventListener('mousedown', e => { isDown = true; lastX = e.clientX; lastY = e.clientY; });
+    window.addEventListener('mouseup', () => { isDown = false; });
+    el.addEventListener('mousemove', e => {
+      if (!isDown) return;
+      orbit.theta += (e.clientX - lastX) * 0.005;
+      orbit.phi = Math.max(0.2, Math.min(Math.PI - 0.2, orbit.phi - (e.clientY - lastY) * 0.005));
+      lastX = e.clientX; lastY = e.clientY;
+    });
+    el.addEventListener('wheel', e => {
+      e.preventDefault();
+      orbit.dist = Math.max(0.8, Math.min(6, orbit.dist + e.deltaY * 0.005));
+    }, { passive: false });
+
+    if (slider) slider.addEventListener('input', e => loadFrame(parseInt(e.target.value, 10)));
+
+    updateCamera();
+    loadFrame(0);
+    animate();
+  }
+
+  function updateCamera() {
+    const x = orbit.dist * Math.sin(orbit.phi) * Math.sin(orbit.theta);
+    const y = orbit.dist * Math.cos(orbit.phi);
+    const z = orbit.dist * Math.sin(orbit.phi) * Math.cos(orbit.theta);
+    camera.position.set(x, y, z);
+    camera.lookAt(0, 0, 0);
+  }
+
+  function parseObj(text) {
+    const positions = [];
+    const indices = [];
+    const lines = text.split(/\n/);
+    for (const line of lines) {
+      const t = line.trim();
+      if (t.startsWith('v ')) {
+        const parts = t.slice(2).trim().split(/\s+/);
+        positions.push(parseFloat(parts[0]), parseFloat(parts[1]), parseFloat(parts[2]));
+      } else if (t.startsWith('f ')) {
+        const parts = t.slice(2).trim().split(/\s+/);
+        const vs = parts.map(p => parseInt(p.split('/')[0], 10) - 1);
+        for (let i = 1; i < vs.length - 1; i++) {
+          indices.push(vs[0], vs[i], vs[i + 1]);
+        }
+      }
+    }
+    return { positions: new Float32Array(positions), indices: new Uint16Array(indices) };
+  }
+
+  async function loadFrame(idx) {
+    if (idx < 0 || idx >= frames.length) return;
+    const f = frames[idx];
+    if (label) label.textContent = `Frame ${f.frame} / ${frames.length}`;
+    if (slider) slider.value = idx;
+
+    if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); mesh = null; }
+
+    let geo = geoCache[f.obj];
+    if (!geo) {
+      try {
+        const res = await fetch(`/api/gait/sessions/${s.id}/artifacts/${encodeURIComponent(f.obj)}`);
+        if (!res.ok) throw new Error('obj fetch failed');
+        const text = await res.text();
+        geo = parseObj(text);
+        geoCache[f.obj] = geo;
+      } catch (e) {
+        console.warn('SMPLX obj load failed:', f.obj, e);
+        return;
+      }
+    }
+
+    const buf = new THREE.BufferGeometry();
+    buf.setAttribute('position', new THREE.BufferAttribute(geo.positions, 3));
+    buf.setIndex(new THREE.BufferAttribute(geo.indices, 1));
+    buf.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x46b4dc, wireframe: false, flatShading: true });
+    mesh = new THREE.Mesh(buf, mat);
+    scene.add(mesh);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (mesh) mesh.rotation.y += 0.005;
+    if (renderer && camera && scene) renderer.render(scene, camera);
+  }
+
+  window.addEventListener('resize', () => {
+    if (!camera || !renderer) return;
+    camera.aspect = el.clientWidth / Math.max(el.clientHeight, 1);
+    camera.updateProjectionMatrix();
+    renderer.setSize(el.clientWidth, el.clientHeight);
+  });
+
+  init();
+}
 
 function escapeHtml(str) {
   const div = document.createElement('div');

@@ -254,9 +254,10 @@ class SmplxFitter:
         angles = self._angles_from_verts(verts)
         obj_path = None
         if out_dir:
-            smplx_dir = os.path.join(out_dir, "smplx")
-            os.makedirs(smplx_dir, exist_ok=True)
-            obj_path = os.path.join(smplx_dir, "frame_%04d.obj" % frame_idx)
+            # Write obj directly into the artifacts root so the Node artifact
+            # route (GET /api/gait/sessions/:id/artifacts/:file) can serve it.
+            os.makedirs(out_dir, exist_ok=True)
+            obj_path = os.path.join(out_dir, "smplx_frame_%04d.obj" % frame_idx)
             self._write_obj(obj_path, verts, faces)
 
         return {
