@@ -190,6 +190,16 @@ if (!gaitCols.includes('combined_video')) {
 if (!gaitCols.includes('combined_name')) {
   try { db.exec('ALTER TABLE gait_sessions ADD COLUMN combined_name TEXT'); } catch (e) { /* ignore */ }
 }
+// 2.md — third plane upload (Coronal Plane per spec). Anatomically the frontal
+// plane is the coronal plane, so this third slot is an additional camera view
+// for tri-view triangulation, stored under a neutral `third` key to avoid
+// colliding with the existing `frontal` slot. Display label: "Coronal Plane".
+if (!gaitCols.includes('third_video')) {
+  try { db.exec('ALTER TABLE gait_sessions ADD COLUMN third_video TEXT'); } catch (e) { /* ignore */ }
+}
+if (!gaitCols.includes('third_name')) {
+  try { db.exec('ALTER TABLE gait_sessions ADD COLUMN third_name TEXT'); } catch (e) { /* ignore */ }
+}
 if (!gaitCols.includes('speed_hint')) {
   try { db.exec("ALTER TABLE gait_sessions ADD COLUMN speed_hint TEXT DEFAULT 'auto'"); } catch (e) { /* ignore */ }
 }

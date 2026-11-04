@@ -294,6 +294,14 @@ def _pose_input(frame, max_dim=480, interp=cv2.INTER_AREA):
 # path. cv3d reuses them instead of re-running MediaPipe on the same clips.
 TRACK_CACHE = {}
 
+# 2.md — SMPL-X fitting spike (python/smplx_fit.py). OFF by default: flip to
+# True only after the decision gate (SMPL-X model files procured + angle
+# agreement vs MediaPipe + runtime acceptable on CPU). When on, the third
+# (Coronal) plane's raw keypoints are fitted per frame and corrected 3D knee
+# angles are merged into result["smplx"]. Existing report logic is untouched.
+USE_SMPLX = False
+SMPLX_MODEL_DIR = "smplx_models"
+
 
 def _register_track(video_path, slot, fps, width, height, step, landmarks):
     """Store an inferred 2D landmark track for later reuse by the 3D pipeline."""
@@ -302,6 +310,50 @@ def _register_track(video_path, slot, fps, width, height, step, landmarks):
         "height": height, "step": step, "samples": len(landmarks),
         "landmarks": landmarks,
     }
+
+
+# MediaPipe Pose 33 landmark canonical order (index -> name), used to build a
+# flat keypoint list for the SMPL-X fitter (python/smplx_fit.py expects either
+# 33 MediaPipe or 25 OpenPose-25 keypoints per frame).
+_MP33_ORDER = ["nose", "left_eye_inner", "left_eye", "left_eye_outer",
+               "right_eye_inner", "right_eye", "right_eye_outer",
+               "left_ear", "right_ear", "mouth_left", "mouth_right",
+               "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+               "left_wrist", "right_wrist", "left_pinky", "right_pinky",
+               "left_index", "right_index", "left_thumb", "right_thumb",
+               "left_hip", "right_hip", "left_knee", "right_knee",
+               "left_ankle", "right_ankle", "left_heel", "right_heel",
+               "left_foot_index", "right_foot_index"]
+# Map MediaPipe name -> (side, pantry joint) for lookup in TRACK_CACHE pts.
+_MP33_TO_PTS = {
+    "left_ear": ("L", "ear"), "right_ear": ("R", "ear"),
+    "left_shoulder": ("L", "shoulder"), "right_shoulder": ("R", "shoulder"),
+    "left_elbow": ("L", "elbow"), "right_elbow": ("R", "elbow"),
+    "left_wrist": ("L", "wrist"), "right_wrist": ("R", "wrist"),
+    "left_hip": ("L", "hip"), "right_hip": ("R", "hip"),
+    "left_knee": ("L", "knee"), "right_knee": ("R", "knee"),
+    "left_ankle": ("L", "ankle"), "right_ankle": ("R", "ankle"),
+    "left_foot_index": ("L", "toe"), "right_foot_index": ("R", "toe"),
+}
+
+
+def _pts_to_mediapipe33(pts):
+    """Convert TRACK_CACHE per-side pts dict to a flat list of 33 MediaPipe
+    keypoints {x, y, visibility}. Missing joints get visibility 0."""
+    out = []
+    for name in _MP33_ORDER:
+        entry = _MP33_TO_PTS.get(name)
+        if entry:
+            side, joint = entry
+            pt = (pts or {}).get(side, {}).get(joint)
+            if pt:
+                out.append({"x": float(pt[0]), "y": float(pt[1]),
+                            "visibility": 1.0})
+            else:
+                out.append({"x": 0.0, "y": 0.0, "visibility": 0.0})
+        else:
+            out.append({"x": 0.0, "y": 0.0, "visibility": 0.0})
+    return out
 
 
 _progress = {"phase": "", "pct": 0}
@@ -2324,6 +2376,9 @@ def main():
     parser.add_argument("--combined", default=None,
                         help="single dual-plane video (split-screen/stacked) with frontal "
                              "and sagittal views captured together")
+    parser.add_argument("--third", default=None,
+                        help="third camera view (Coronal Plane per 2.md spec) for tri-view "
+                             "triangulation; anatomically front-facing like frontal")
     parser.add_argument("--artifacts", default=None, help="dir for overlay videos + graphs")
     parser.add_argument("--out", required=True)
     parser.add_argument("--height-cm", default=None,
@@ -2360,6 +2415,7 @@ def main():
 
     sagittal_abs = args.sagittal
     frontal_abs = args.frontal
+    third_abs = args.third
 
     # 3e.txt — combined dual-plane capture: split the two halves first, then run the
     # normal plane analyzers + the multi-view 3D engine on the derived sub-videos.
@@ -2412,11 +2468,19 @@ def main():
     fro_step = _aligned_step(frontal_abs) if frontal_abs and os.path.exists(frontal_abs) else None
     gv_fro = _screen_plane(frontal_abs, "frontal", speed_hint, plan=fro_step)
     gv_map = {"sagittal": gv_sag, "frontal": gv_fro}
+    # 2.md — third (Coronal) plane: front-facing like frontal, so it shares the
+    # frontal gait-validity screen but is tracked under its own key.
+    if third_abs and os.path.exists(third_abs):
+        _report_progress(10, "Gait-validity screening (2e.txt) — third/coronal plane")
+        third_step = _aligned_step(third_abs) if third_abs else None
+        gv_third = _screen_plane(third_abs, "frontal", speed_hint, plan=third_step)
+        gv_map["third"] = gv_third
     _tick("screen")
 
     analyzable = {p for p, gv in gv_map.items()
                   if gv and gv.get("status") == "ok" and
-                  (sagittal_abs if p == "sagittal" else frontal_abs)}
+                  ((sagittal_abs if p == "sagittal" else
+                    frontal_abs if p == "frontal" else third_abs))}
     if not analyzable:
         result = _build_rejection_result(args.session, args.patient, gv_map, _combined_split)
         result["input"]["mode-note"] = "blocked"
@@ -2487,9 +2551,75 @@ def main():
         cv_frontal = _empty_cv("frontal", "no frontal video")
     _tick("frontal_analyze")
 
+    cv_third = {}
+    if third_abs and os.path.exists(third_abs):
+        if gv_map.get("third") and gv_map["third"].get("status") == "ok":
+            _report_progress(16, "Analyzing third (coronal) plane — pose estimation")
+            try:
+                thi_spd = 1.0
+                thi_run = False
+                thi_step = _aligned_step(third_abs) if third_abs else None
+                if isinstance(gv_map.get("third"), dict):
+                    thi_spd = float(gv_map["third"].get("playback_speed", 1.0) or 1.0)
+                    thi_run = bool(gv_map["third"].get("running"))
+                cv_third = analyze_frontal(third_abs, artifacts, args.session,
+                                           step=(thi_step["step"] if thi_step else None),
+                                           start=(thi_step["start"] if thi_step else 0),
+                                           speed_factor=thi_spd, running=thi_run)
+            except Exception as exc:  # pragma: no cover
+                cv_third = _empty_cv("third", f"analysis error: {exc}")
+            cv_third["gait_validation"] = gv_map["third"]
+            _report_progress(64, "Third (coronal) plane landmarks done — building overlay & graphs")
+        else:
+            cv_third = _empty_cv("third", NO_VALID_GAIT_MSG, status="rejected")
+            cv_third["gait_validation"] = gv_map.get("third")
+    else:
+        cv_third = _empty_cv("third", "no third video")
+    _tick("third_analyze")
+
+    # 2.md — SMPL-X per-frame fitting on the third (Coronal) plane's raw
+    # keypoints. Gated by USE_SMPLX (off by default) and by the presence of
+    # license-gated SMPL-X model files. Zero-assumption: when off or when
+    # models are missing, result["smplx"] reports unassessed and no angles are
+    # fabricated. Existing report logic is untouched.
+    smplx_block = {"status": "unassessed",
+                   "reason": "SMPL-X fitting is disabled (USE_SMPLX=False) or no license-gated model files present."}
+    if USE_SMPLX:
+        try:
+            from smplx_fit import fit_frame, STATUS_ASSESSED
+        except Exception:
+            fit_frame = None
+        third_track = TRACK_CACHE.get(os.path.abspath(third_abs)) if third_abs else None
+        if fit_frame and third_track and third_track.get("landmarks"):
+            fitted = []
+            for fr in third_track["landmarks"]:
+                kp33 = _pts_to_mediapipe33(fr.get("pts"))
+                res = fit_frame(kp33, artifacts, model_dir=SMPLX_MODEL_DIR,
+                                gender=(args.gender or "neutral"), frame_idx=int(fr.get("abs", 0)))
+                if res.get("status") == STATUS_ASSESSED:
+                    fitted.append({"frame": int(fr.get("abs", 0)),
+                                   "angles_deg": res.get("angles_deg", {}),
+                                   "obj_path": res.get("obj_path")})
+            if fitted:
+                smplx_block = {"status": "assessed",
+                               "frames_fitted": len(fitted),
+                               "frames_total": len(third_track["landmarks"]),
+                               "gender": (args.gender or "neutral"),
+                               "model_dir": SMPLX_MODEL_DIR,
+                               "frames": fitted}
+            else:
+                smplx_block = {"status": "unassessed",
+                               "reason": "SMPL-X fitting produced no corrected frames (model files may be missing)."}
+        elif not fit_frame:
+            smplx_block = {"status": "unassessed",
+                           "reason": "smplx_fit module unavailable."}
+        else:
+            smplx_block = {"status": "unassessed",
+                           "reason": "No raw keypoint track cached for the third video."}
+
     _report_progress(88, "Generating clinical report, ROM plots & colour legends")
     tracks_for_anthro = {tr.get("slot"): tr for tr in list(TRACK_CACHE.values())
-                         if tr.get("slot") in ("sagittal", "frontal") and tr.get("landmarks")}
+                         if tr.get("slot") in ("sagittal", "frontal", "third") and tr.get("landmarks")}
     anthro_block = anthropometry.compute_anthropometrics(tracks_for_anthro, height_cm)
     try:
         context_block = json.loads(args.context) if args.context else {}
@@ -2506,6 +2636,8 @@ def main():
         "gmfcs": gmfcs_context,
         "cp_knee": result.get("cp_knee"),
     }
+    result["cv_third"] = cv_third
+    result["smplx"] = smplx_block
     _tick("derive_graphs")
 
     # 2e.txt item 1 — multi-view 3D pipeline: when BOTH planes are available,
@@ -2514,29 +2646,30 @@ def main():
     cv3d = {"status": "not_run", "mode": "single-plane",
             "anatomical_note":
                 "Only one complete plane was analyzed; the multi-view 3D pipeline activates "
-                "when both frontal and sagittal recordings are provided."}
-    has_dual = bool(sagittal_abs and frontal_abs and analyzable >= {"sagittal", "frontal"})
-    if has_dual:
+                "when two or more planes are provided."}
+    has_multi = bool(analyzable >= {"sagittal", "frontal"})
+    if has_multi:
         try:
             from cv3d import run_multi_view_3d
             cv3d = run_multi_view_3d(sagittal_abs, frontal_abs, artifacts, args.session,
+                                     third_abs=third_abs,
                                      report_progress=_report_progress)
         except Exception as exc:  # pragma: no cover
-            cv3d = {"status": "error", "mode": "dual-view-3d",
+            cv3d = {"status": "error", "mode": "multi-view-3d",
                     "anatomical_note":
                         "Multi-view 3D triangulation failed; single-plane findings below remain valid.",
                     "error": str(exc)}
-        _report_progress(88, "Dual planes triangulated into 3D kinematics")
+        _report_progress(88, "Multi planes triangulated into 3D kinematics")
 
     result["cv3d"] = cv3d
     _tick("cv3d")
     result["gait_validation"] = {"status": "ok", "message": "",
                                  "planes": {p: (cv.get("gait_validation") or {}).get("status")
-                                            for p, cv in (("sagittal", cv_sagittal), ("frontal", cv_frontal))}}
+                                            for p, cv in (("sagittal", cv_sagittal), ("frontal", cv_frontal), ("third", cv_third))}}
     if _combined_name:
-        result["input"]["routing"] = "combined-dual-view" if has_dual else "combined-unroutable"
+        result["input"]["routing"] = "combined-dual-view" if has_multi else "combined-unroutable"
     else:
-        result["input"]["routing"] = "dual-view-3d" if has_dual else "single-plane"
+        result["input"]["routing"] = "multi-view-3d" if has_multi else "single-plane"
 
     # run.txt §2 / §5 — metric anthropometry (physician-height calibrated) + the
     # zero-assumption integrity ledger that reports every parameter's confidence status.
@@ -2552,8 +2685,8 @@ def main():
 
     _report_progress(100, "Analysis complete")
     _dump_stage_times()
-    print("OK mode={0} session={1} sagittal={2} frontal={3}".format(
-        result["mode"], args.session, cv_sagittal.get("status"), cv_frontal.get("status")), flush=True)
+    print("OK mode={0} session={1} sagittal={2} frontal={3} third={4}".format(
+        result["mode"], args.session, cv_sagittal.get("status"), cv_frontal.get("status"), cv_third.get("status")), flush=True)
     # Hard-exit: results are on disk and stdout is flushed. Skipping normal
     # interpreter shutdown avoids the MediaPipe video-landmarker teardown and
     # matplotlib font-manager teardown, which hang for minutes on this C11

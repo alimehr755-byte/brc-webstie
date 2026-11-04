@@ -162,7 +162,13 @@
         <input type="file" id="sagittal-input" accept="video/*" class="mt-12" style="font-size:.85rem;">
         <p class="mt-8" id="sagittal-name" style="font-size:.8rem; color:var(--sage-700);"></p>
       </div>
-      <div class="upload-zone" id="combined-zone" style="grid-column:1 / -1;">
+      <div class="upload-zone" id="third-zone">
+        <p><strong>Coronal / Third Plane video</strong></p>
+        <p style="color:var(--ink-600); font-size:.85rem;">Additional camera view for tri-view 3D triangulation (MP4 / MOV / WebM, max 200&nbsp;MB). Anatomically front-facing like the frontal plane; used as a third view to reduce parallax error.</p>
+        <input type="file" id="third-input" accept="video/*" class="mt-12" style="font-size:.85rem;">
+        <p class="mt-8" id="third-name" style="font-size:.8rem; color:var(--sage-700);"></p>
+      </div>
+      <div class="upload-zone" id="combined-zone">
         <p><strong>Combined Dual-Plane Video (Simultaneous Frontal &amp; Sagittal Capture)</strong></p>
         <p style="color:var(--ink-600); font-size:.85rem;">One recording with both views captured together (e.g. split-screen or stacked — we separate the planes automatically). MP4 / MOV / WebM, max 200&nbsp;MB.</p>
         <input type="file" id="combined-input" accept="video/*" class="mt-12" style="font-size:.85rem;">

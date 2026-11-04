@@ -89,7 +89,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: MAX_VIDEO_BYTES, files: 3 },
+  limits: { fileSize: MAX_VIDEO_BYTES, files: 4 },
   fileFilter: (req, file, cb) => {
     const mimeOk = String(file.mimetype || '').startsWith('video/');
     const extOk = VIDEO_EXTENSIONS.test(file.originalname || '');
@@ -97,7 +97,7 @@ const upload = multer({
   }
 });
 
-const SESSION_FIELDS = 'id, user_id, status, frontal_video, sagittal_video, frontal_name, sagittal_name, combined_video, combined_name, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name, results, analyzer_meta, review_note, reviewed_by, reviewed_at, created_at, updated_at';
+const SESSION_FIELDS = 'id, user_id, status, frontal_video, sagittal_video, frontal_name, sagittal_name, combined_video, combined_name, third_video, third_name, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name, results, analyzer_meta, review_note, reviewed_by, reviewed_at, created_at, updated_at';
 
 function serialize(row, includeResults = false) {
   const s = { ...row };
@@ -310,7 +310,7 @@ async function runAnalyzer(session) {
     // interpreter (py/python) treats "--session" as its own option and exits instantly.
     const args = [labPath, '--session', String(session.id), '--patient', patientName,
       '--frontal', resolveVideo(session.frontal_video), '--sagittal', resolveVideo(session.sagittal_video),
-      '--combined', resolveVideo(session.combined_video),
+      '--combined', resolveVideo(session.combined_video), '--third', resolveVideo(session.third_video),
       '--artifacts', artifactsAbsDir, '--out', outFile,
     '--height-cm', String(session.height_cm ?? ''),
     '--speed-hint', String(session.speed_hint || 'auto')];
@@ -728,7 +728,8 @@ router.post('/sessions/:id/videos', requireAuth, (req, res) => {
   upload.fields([
     { name: 'frontal', maxCount: 1 },
     { name: 'sagittal', maxCount: 1 },
-    { name: 'combined', maxCount: 1 }
+    { name: 'combined', maxCount: 1 },
+    { name: 'third', maxCount: 1 }
   ])(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message || 'Upload failed.' });
 
@@ -736,22 +737,24 @@ router.post('/sessions/:id/videos', requireAuth, (req, res) => {
     const frontal = files.frontal && files.frontal[0];
     const sagittal = files.sagittal && files.sagittal[0];
     const combined = files.combined && files.combined[0];
+    const third = files.third && files.third[0];
 
     const cleanUp = () => {
-      [frontal, sagittal, combined].forEach(f => {
+      [frontal, sagittal, combined, third].forEach(f => {
         if (f) { try { fs.unlinkSync(f.path); } catch (e) { /* noop */ } }
       });
     };
 
-    if (!frontal && !sagittal && !combined) {
-      return res.status(400).json({ error: 'Please attach at least one video (Frontal, Sagittal, and/or Combined Dual-Plane).' });
+    if (!frontal && !sagittal && !combined && !third) {
+      return res.status(400).json({ error: 'Please attach at least one video (Frontal, Sagittal, Combined Dual-Plane, or Coronal/Third Plane).' });
     }
 
-    // 3e.txt — mutual exclusion: the two individual slots and the combined
-    // dual-plane capture are mutually exclusive capture modes.
-    const existingIndividual = Boolean(row.frontal_video || row.sagittal_video);
-    const incomingIndividual = Boolean(frontal || sagittal);
-    if ((combined && (incomingIndividual || existingIndividual)) || (incomingIndividual && row.combined_video)) {
+    // 3e.txt — mutual exclusion: the combined dual-plane capture is mutually
+    // exclusive with separate Frontal/Sagittal uploads. The third (Coronal)
+    // plane is an additional camera view and may accompany any mode.
+    const existingFrontalSagittal = Boolean(row.frontal_video || row.sagittal_video);
+    const incomingFrontalSagittal = Boolean(frontal || sagittal);
+    if ((combined && (incomingFrontalSagittal || existingFrontalSagittal)) || (incomingFrontalSagittal && row.combined_video)) {
       cleanUp();
       return res.status(400).json({ error: COMBINED_CONFLICT_MSG });
     }
@@ -769,6 +772,7 @@ router.post('/sessions/:id/videos', requireAuth, (req, res) => {
     if (frontal && !sniff('Frontal Plane', frontal)) return;
     if (sagittal && !sniff('Sagittal Plane', sagittal)) return;
     if (combined && !sniff('Combined Dual-Plane', combined)) return;
+    if (third && !sniff('Coronal/Third Plane', third)) return;
 
     // 3e.txt — plane-orientation verification + 2e.txt gait-validity gate at upload
     // time. Fail-closed: a clip that cannot be screened, or that fails the walking
@@ -780,17 +784,22 @@ router.post('/sessions/:id/videos', requireAuth, (req, res) => {
         res.status(400).json({ error: (cp && cp.gait_validation && cp.gait_validation.message) || NO_GENUINE_GAIT_MSG });
         return false;
       }
-      const mismatch = cp && cp.detected && (slot === 'frontal' ? cp.detected === 'sagittal' : cp.detected === 'frontal');
-      if (mismatch) {
-        cleanUp();
-        res.status(400).json({ error: mismatchMsg });
-        return false;
+      // Frontal/sagittal slot mismatch checks stay strict; the third (Coronal)
+      // plane is an additional camera angle, so it only needs a valid gait screen.
+      if (slot === 'frontal' || slot === 'sagittal') {
+        const mismatch = cp && cp.detected && (slot === 'frontal' ? cp.detected === 'sagittal' : cp.detected === 'frontal');
+        if (mismatch) {
+          cleanUp();
+          res.status(400).json({ error: mismatchMsg });
+          return false;
+        }
       }
       return true;
     };
     if (frontal && !(await verifyPlane(frontal, 'frontal', WRONG_FRONTAL_SLOT_MSG))) return;
     if (sagittal && !(await verifyPlane(sagittal, 'sagittal', WRONG_SAGGITTAL_SLOT_MSG))) return;
     if (combined && !(await verifyPlane(combined, 'sagittal', NO_GENUINE_GAIT_MSG))) return;
+    if (third && !(await verifyPlane(third, 'third', NO_GENUINE_GAIT_MSG))) return;
 
     // Only remove the previously uploaded file for the plane(s) being replaced.
     if (frontal) {
@@ -799,6 +808,10 @@ router.post('/sessions/:id/videos', requireAuth, (req, res) => {
     }
     if (sagittal) {
       const abs = resolveUploadRel(row.sagittal_video);
+      if (abs) { try { fs.unlinkSync(abs); } catch (e) { /* noop */ } }
+    }
+    if (third) {
+      const abs = resolveUploadRel(row.third_video);
       if (abs) { try { fs.unlinkSync(abs); } catch (e) { /* noop */ } }
     }
 
@@ -810,17 +823,23 @@ router.post('/sessions/:id/videos', requireAuth, (req, res) => {
     const newCombined = combined ? relUploadPath(combined.path) : row.combined_video;
     const newCombinedName = combined ? String(combined.originalname).slice(0, 255) : row.combined_name;
 
+    const newThird = third ? relUploadPath(third.path) : row.third_video;
+    const newThirdName = third ? String(third.originalname).slice(0, 255) : row.third_name;
+
     db.prepare(`
       UPDATE gait_sessions
       SET frontal_video = ?, sagittal_video = ?, frontal_name = ?, sagittal_name = ?,
-          combined_video = ?, combined_name = ?, updated_at = datetime('now')
+          combined_video = ?, combined_name = ?,
+          third_video = ?, third_name = ?,
+          updated_at = datetime('now')
       WHERE id = ?
-    `).run(newFrontal, newSagittal, newFrontalName, newSagittalName, newCombined, newCombinedName, row.id);
+    `).run(newFrontal, newSagittal, newFrontalName, newSagittalName, newCombined, newCombinedName, newThird, newThirdName, row.id);
 
     const planes = [
       combined ? 'Combined dual-plane' : null,
       frontal ? 'Frontal' : null,
-      sagittal ? 'Sagittal' : null
+      sagittal ? 'Sagittal' : null,
+      third ? 'Coronal/Third' : null
     ].filter(Boolean).join(' + ');
     res.json({ success: true, message: `${planes} video(s) uploaded. Run analysis to generate the report.` });
   });
@@ -831,8 +850,8 @@ router.post('/sessions/:id/analyze', requireAuth, async (req, res) => {
   const row = loadSession(req, res);
   if (!row) return;
   if (!canAccess(req, row)) return res.status(403).json({ error: 'Not your session.' });
-  if (!row.frontal_video && !row.sagittal_video && !row.combined_video) {
-    return res.status(400).json({ error: 'Upload at least one video (Frontal, Sagittal, or Combined Dual-Plane) before analyzing.' });
+  if (!row.frontal_video && !row.sagittal_video && !row.combined_video && !row.third_video) {
+    return res.status(400).json({ error: 'Upload at least one video (Frontal, Sagittal, Combined Dual-Plane, or Coronal/Third Plane) before analyzing.' });
   }
 
   try {
@@ -925,8 +944,8 @@ router.get('/sessions/:id/progression', requireAuth, (req, res) => {
 
 // Preview a stored walk video (owner or staff).
 router.get('/sessions/:id/video/:plane', requireAuth, (req, res) => {
-  if (req.params.plane !== 'frontal' && req.params.plane !== 'sagittal' && req.params.plane !== 'combined') {
-    return res.status(400).json({ error: 'Plane must be frontal, sagittal, or combined.' });
+  if (req.params.plane !== 'frontal' && req.params.plane !== 'sagittal' && req.params.plane !== 'combined' && req.params.plane !== 'third') {
+    return res.status(400).json({ error: 'Plane must be frontal, sagittal, combined, or third.' });
   }
   const row = loadSession(req, res);
   if (!row) return;
@@ -947,7 +966,7 @@ router.delete('/sessions/:id', requireAuth, (req, res) => {
   if (!row) return;
   if (!canAccess(req, row)) return res.status(403).json({ error: 'Not your session.' });
 
-  [row.frontal_video, row.sagittal_video, row.combined_video].forEach(p => {
+  [row.frontal_video, row.sagittal_video, row.combined_video, row.third_video].forEach(p => {
     const abs = resolveUploadRel(p);
     if (abs) { try { fs.unlinkSync(abs); } catch (e) { /* noop */ } }
   });
@@ -1662,11 +1681,12 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   // ---- multi-view 3D kinematics (2e.txt items 1 & 4) ----
   if (r.cv3d && r.cv3d.status === 'ok') {
     const c3 = r.cv3d;
+    const tri = Boolean((c3.calibration || {}).third_view_used);
     doc.moveDown(0.6);
-    doc.fontSize(13).fillColor('#1E3C82').text('Multi-View 3D Kinematics (Dual-Plane Triangulation)');
+    doc.fontSize(13).fillColor('#1E3C82').text(tri ? 'Multi-View 3D Kinematics (Tri-View Triangulation)' : 'Multi-View 3D Kinematics (Dual-Plane Triangulation)');
     doc.moveDown(0.4);
     doc.fontSize(8.5).fillColor('#5A5D55').text(
-      `Engine: ${c3.engine === 'brc-multiview-3d' ? 'BRC multi-view 3D (calibrated)' : 'BRC dual-view triangulation (orthographic)'}  ·  Samples: ${c3.samples}  ·  Units: ${(c3.calibration || {}).units || 'normalized'}`, { width: 495 });
+      `Engine: ${c3.engine === 'brc-multiview-3d' ? 'BRC multi-view 3D (calibrated)' : 'BRC orthographic least-squares triangulation'}  ·  ${tri ? 'tri-view' : 'dual-view'}  ·  Samples: ${c3.samples}  ·  Units: ${(c3.calibration || {}).units || 'normalized'}  ·  Cameras: ${tri ? 'frontal + sagittal + third (Coronal)' : 'frontal + sagittal'}`, { width: 495 });
     doc.moveDown(0.3);
     const angleNames = { hip_flex: 'Hip flexion', knee_flex: 'Knee flexion', ankle_angle: 'Ankle angle', shoulder_flex: 'Shoulder flexion', elbow_flex: 'Elbow flexion', knee_valgus: 'Knee frontal deviation' };
     const angleRows = Object.keys(angleNames).filter(k => c3.joint_angles_3d && c3.joint_angles_3d[k]).map(k => [
@@ -1686,23 +1706,23 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
       doc.fontSize(8.5).fillColor('#232520').text(
         `Symmetry indices — knee flexion ${si(c3.symmetry.knee_flex_si)} · hip flexion ${si(c3.symmetry.hip_flex_si)} · thigh length ${si(c3.symmetry.thigh_si)} · shank length ${si(c3.symmetry.shank_si)}`, { width: 495 });
     }
-    const embed3d = (rel, height) => {
+    const embed3d = (rel, height, label) => {
       if (!rel) return;
       const abs = resolveUploadRel(rel);
-      if (!abs || !fs.existsSync(abs)) { doc.fontSize(7.5).fillColor('#5A5D55').text('(3D graph not embedded — artifact missing)', { width: 495 }); return; }
+      if (!abs || !fs.existsSync(abs)) { doc.fontSize(7.5).fillColor('#5A5D55').text(`(3D graph not embedded — artifact missing: ${label})`, { width: 495 }); return; }
       if (doc.y + height > doc.page.height - 60) doc.addPage();
       doc.image(abs, 50, doc.y, { width: 495 });
       doc.y += height + 6;
     };
     if (c3.plots && c3.plots.sim3d_anatomy) {
       doc.moveDown(0.4);
-      doc.fontSize(9).fillColor('#232520').text('Reconstructed anatomy (frontal + sagittal projections):');
-      embed3d(c3.plots.sim3d_anatomy, 235);
+      doc.fontSize(9).fillColor('#232520').text(`Reconstructed anatomy (${tri ? 'frontal + sagittal + third (Coronal)' : 'frontal + sagittal'} projections):`);
+      embed3d(c3.plots.sim3d_anatomy, 235, 'anatomy');
     }
     if (c3.plots && c3.plots.sim3d_angles) {
       doc.moveDown(0.3);
-      doc.fontSize(9).fillColor('#232520').text('3D joint-angle kinematics curves (dual-plane reconstruction):');
-      embed3d(c3.plots.sim3d_angles, 218);
+      doc.fontSize(9).fillColor('#232520').text('3D joint-angle kinematics curves (multi-view reconstruction):');
+      embed3d(c3.plots.sim3d_angles, 218, 'angles');
     }
     if (c3.anatomical_note) { doc.moveDown(0.2); doc.fontSize(7.5).fillColor('#5A5D55').text(c3.anatomical_note, { width: 495 }); }
   }
@@ -2061,8 +2081,9 @@ router.get('/sessions/:id/report.docx', requireAuth, async (req, res) => {
 
   if (r.cv3d && r.cv3d.status === 'ok') {
     const c3 = r.cv3d;
-    children.push(new Paragraph({ text: 'Multi-View 3D Kinematics (Dual-Plane Triangulation)', heading: HeadingLevel.HEADING_1 }));
-    children.push(new Paragraph({ text: `Engine: ${c3.engine === 'brc-multiview-3d' ? 'BRC multi-view 3D (calibrated)' : 'BRC dual-view triangulation (orthographic)'}  ·  Samples: ${c3.samples}  ·  Units: ${(c3.calibration || {}).units || 'normalized'}`, color: '666666', size: 16, spacing: { after: 200 } }));
+    const tri = Boolean((c3.calibration || {}).third_view_used);
+    children.push(new Paragraph({ text: tri ? 'Multi-View 3D Kinematics (Tri-View Triangulation)' : 'Multi-View 3D Kinematics (Dual-Plane Triangulation)', heading: HeadingLevel.HEADING_1 }));
+    children.push(new Paragraph({ text: `Engine: ${c3.engine === 'brc-multiview-3d' ? 'BRC multi-view 3D (calibrated)' : 'BRC orthographic least-squares triangulation'}  ·  ${tri ? 'tri-view' : 'dual-view'}  ·  Samples: ${c3.samples}  ·  Units: ${(c3.calibration || {}).units || 'normalized'}  ·  Cameras: ${tri ? 'frontal + sagittal + third (Coronal)' : 'frontal + sagittal'}`, color: '666666', size: 16, spacing: { after: 200 } }));
     const angleNames3d = { hip_flex: 'Hip flexion', knee_flex: 'Knee flexion', ankle_angle: 'Ankle angle', shoulder_flex: 'Shoulder flexion', elbow_flex: 'Elbow flexion', knee_valgus: 'Knee frontal deviation' };
     const a3Rows = [new TableRow({ children: ['3D Joint Angle', 'Left (median)', 'Right (median)'].map(h => new TableCell({ children: [new Paragraph({ text: h, bold: true })] })) })];
     Object.keys(angleNames3d).forEach(k => {
@@ -2104,13 +2125,13 @@ router.get('/sessions/:id/report.docx', requireAuth, async (req, res) => {
       } catch (e) { return null; }
     };
     if (c3.plots && c3.plots.sim3d_anatomy) {
-      children.push(new Paragraph({ text: 'Reconstructed anatomy (frontal + sagittal projections):', bold: true, spacing: { before: 240 } }));
+      children.push(new Paragraph({ text: `Reconstructed anatomy (${tri ? 'frontal + sagittal + third (Coronal)' : 'frontal + sagittal'} projections):`, bold: true, spacing: { before: 240 } }));
       const img = imgRun(c3.plots.sim3d_anatomy, 620);
       if (img) children.push(new Paragraph({ children: [img] }));
       else children.push(new Paragraph({ text: '(3D anatomy graph unavailable for embedding)', color: '666666', size: 16 }));
     }
     if (c3.plots && c3.plots.sim3d_angles) {
-      children.push(new Paragraph({ text: '3D joint-angle kinematics curves (dual-plane reconstruction):', bold: true, spacing: { before: 240 } }));
+      children.push(new Paragraph({ text: '3D joint-angle kinematics curves (multi-view reconstruction):', bold: true, spacing: { before: 240 } }));
       const img = imgRun(c3.plots.sim3d_angles, 620);
       if (img) children.push(new Paragraph({ children: [img] }));
       else children.push(new Paragraph({ text: '(3D angle graph unavailable for embedding)', color: '666666', size: 16 }));

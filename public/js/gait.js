@@ -80,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (overlay) overlay.addEventListener('click', e => { if (e.target === overlay) hideGaitRejectionModal(); });
 });
 
-const PLANE_EL = { 'frontal-input': 'frontal-name', 'sagittal-input': 'sagittal-name', 'combined-input': 'combined-name' };
+const PLANE_EL = { 'frontal-input': 'frontal-name', 'sagittal-input': 'sagittal-name', 'combined-input': 'combined-name', 'third-input': 'third-name' };
 
 function validateVideoFile(input, msg) {
   const file = input.files && input.files[0];
@@ -217,7 +217,11 @@ function mutualExclusionHolds(pickedInput) {
   const frontal = document.getElementById('frontal-input');
   const sagittal = document.getElementById('sagittal-input');
   const combined = document.getElementById('combined-input');
+  const third = document.getElementById('third-input');
   const isCombined = pickedInput.id === 'combined-input';
+  // Combined dual-plane capture is mutually exclusive with separate Frontal /
+  // Sagittal uploads. The third (Coronal) plane is an additional camera view
+  // and may accompany any mode.
   const individualPicked = [frontal, sagittal];
   if (isCombined && individualPicked.some(i => i.files.length > 0)) return false;
   if (!isCombined && combined.files.length > 0) return false;
@@ -226,7 +230,7 @@ function mutualExclusionHolds(pickedInput) {
 
 function setupUploadInputs() {
   const msg = document.getElementById('gait-msg');
-  ['frontal-input', 'sagittal-input', 'combined-input'].forEach(id => {
+  ['frontal-input', 'sagittal-input', 'combined-input', 'third-input'].forEach(id => {
     const input = document.getElementById(id);
     input.addEventListener('change', async () => {
       if (!validateVideoFile(input, msg)) return;
@@ -255,32 +259,37 @@ function setupCreateBtn() {
     const frontalInput = document.getElementById('frontal-input');
     const sagittalInput = document.getElementById('sagittal-input');
     const combinedInput = document.getElementById('combined-input');
+    const thirdInput = document.getElementById('third-input');
     const frontal = frontalInput.files[0];
     const sagittal = sagittalInput.files[0];
     const combined = combinedInput.files[0];
+    const third = thirdInput.files[0];
     const notes = document.getElementById('gait-notes').value.trim();
 
     if (frontal && !validateVideoFile(frontalInput, msg)) return;
     if (sagittal && !validateVideoFile(sagittalInput, msg)) return;
     if (combined && !validateVideoFile(combinedInput, msg)) return;
+    if (third && !validateVideoFile(thirdInput, msg)) return;
 
     // 3e.txt — mutual exclusion is enforced once more at submit time.
     if ((frontal || sagittal) && combined) {
       showFormMsg(msg, COMBINED_CONFLICT_MSG, 'error');
       return;
     }
-    if (!frontal && !sagittal && !combined) {
-      showFormMsg(msg, 'Please attach at least one video (Frontal, Sagittal, and/or Combined Dual-Plane).', 'error');
+    if (!frontal && !sagittal && !combined && !third) {
+      showFormMsg(msg, 'Please attach at least one video (Frontal, Sagittal, Combined Dual-Plane, or Coronal/Third Plane).', 'error');
       return;
     }
 
-    // Re-run client verification if a file was picked but never verified (e.g. the
-    // pose library loaded later). Fail-open if the probe is unavailable.
+    // Re-run client verification if a file was picked but never verified.
     if (frontal && frontalInput.dataset.planeOk !== 'ok' && frontalInput.dataset.planeOk !== 'na') {
       if (!(await verifyPlaneOnInput(frontalInput, msg))) return;
     }
     if (sagittal && sagittalInput.dataset.planeOk !== 'ok' && sagittalInput.dataset.planeOk !== 'na') {
       if (!(await verifyPlaneOnInput(sagittalInput, msg))) return;
+    }
+    if (third && thirdInput.dataset.planeOk !== 'ok' && thirdInput.dataset.planeOk !== 'na') {
+      if (!(await verifyPlaneOnInput(thirdInput, msg))) return;
     }
 
     btn.disabled = true;
@@ -308,6 +317,7 @@ function setupCreateBtn() {
         if (frontal) fd.append('frontal', frontal);
         if (sagittal) fd.append('sagittal', sagittal);
         if (combined) fd.append('combined', combined);
+        if (third) fd.append('third', third);
         showFormMsg(msg, 'Uploading & validating videos (this may take a moment)...', 'success');
         const res2 = await fetchWithTimeout(`/api/gait/sessions/${data1.id}/videos`, { method: 'POST', body: fd }, 300000);
         const data2 = await res2.json();
@@ -320,8 +330,8 @@ function setupCreateBtn() {
       document.getElementById('gait-notes').value = '';
       const hInput = document.getElementById('gait-height-cm');
       if (hInput) hInput.value = '';
-      [frontalInput, sagittalInput, combinedInput].forEach(i => { i.value = ''; });
-      ['frontal-name', 'sagittal-name', 'combined-name'].forEach(id => document.getElementById(id).textContent = '');
+      [frontalInput, sagittalInput, combinedInput, thirdInput].forEach(i => { i.value = ''; });
+      ['frontal-name', 'sagittal-name', 'combined-name', 'third-name'].forEach(id => document.getElementById(id).textContent = '');
       loadSessions();
     } catch (err) {
       const errMsg = (err.name === 'AbortError')
@@ -353,10 +363,10 @@ async function loadSessions() {
 }
 
 function sessionCardHtml(s) {
-  const hasVideo = !!s.frontal_name || !!s.sagittal_name || !!s.combined_name;
+  const hasVideo = !!s.frontal_name || !!s.sagittal_name || !!s.combined_name || !!s.third_name;
   const combinedMode = !!s.combined_name;
   const analyzed = s.status === 'analyzed' || s.status === 'reviewed';
-  const videoNames = [s.frontal_name, s.sagittal_name, s.combined_name].filter(Boolean).join('  ·  ');
+  const videoNames = [s.frontal_name, s.sagittal_name, s.combined_name, s.third_name].filter(Boolean).join('  ·  ');
   const frontalBtn = s.frontal_name
     ? `<a class="btn btn-ghost btn-sm" href="/api/gait/sessions/${s.id}/video/frontal" target="_blank">Frontal</a>`
     : `<button class="btn btn-ghost btn-sm" data-action="add" data-id="${s.id}" data-plane="frontal">Add Frontal</button>`;
@@ -366,11 +376,15 @@ function sessionCardHtml(s) {
   const combinedBtn = s.combined_name
     ? `<a class="btn btn-ghost btn-sm" href="/api/gait/sessions/${s.id}/video/combined" target="_blank">Combined</a>`
     : `<button class="btn btn-ghost btn-sm" data-action="add" data-id="${s.id}" data-plane="combined">Add Combined</button>`;
+  const thirdBtn = s.third_name
+    ? `<a class="btn btn-ghost btn-sm" href="/api/gait/sessions/${s.id}/video/third" target="_blank">Coronal/Third</a>`
+    : `<button class="btn btn-ghost btn-sm" data-action="add" data-id="${s.id}" data-plane="third">Add Coronal/Third</button>`;
   return `
     <div class="appt-item" data-id="${s.id}">
       <input type="file" accept="video/*,.mp4,.mov,.webm,.avi,.mkv,.m4v" style="display:none;" data-upload="${s.id}" data-plane="frontal">
       <input type="file" accept="video/*,.mp4,.mov,.webm,.avi,.mkv,.m4v" style="display:none;" data-upload="${s.id}" data-plane="sagittal">
       <input type="file" accept="video/*,.mp4,.mov,.webm,.avi,.mkv,.m4v" style="display:none;" data-upload="${s.id}" data-plane="combined">
+      <input type="file" accept="video/*,.mp4,.mov,.webm,.avi,.mkv,.m4v" style="display:none;" data-upload="${s.id}" data-plane="third">
       <div style="flex:1; min-width:0;">
         <div class="tags">
           <span class="status-badge status-${analyzed ? 'confirmed' : (hasVideo ? 'pending' : '')}">${s.status}</span>
@@ -378,7 +392,7 @@ function sessionCardHtml(s) {
           <span>${formatDate(s.created_at)}</span>
         </div>
         <div style="margin-top:6px; font-size:.88rem;">
-          ${videoNames ? `Videos: <strong>${escapeHtml(videoNames)}</strong>` : '<span style="color:var(--ink-500);">No videos uploaded yet — add a Frontal, Sagittal, and/or Combined clip below.</span>'}
+          ${videoNames ? `Videos: <strong>${escapeHtml(videoNames)}</strong>` : '<span style="color:var(--ink-500);">No videos uploaded yet — add a Frontal, Sagittal, Coronal/Third, and/or Combined clip below.</span>'}
           ${combinedMode ? '<span style="color:var(--ink-500);"> Combined dual-plane capture mode in use.</span>' : ''}
           ${s.notes ? `<div style="color:var(--ink-600); margin-top:2px;">${escapeHtml(s.notes)}</div>` : ''}
           ${(() => {
@@ -404,7 +418,7 @@ function sessionCardHtml(s) {
             ${['auto', 'normal', 'running', 'slowmo_120', 'slowmo_240'].map(v => `<option value="${v}" ${(s.speed_hint || 'auto') === v ? 'selected' : ''}>${speedHintLabel(v)}</option>`).join('')}
           </select>
         </label>` : ''}
-        ${combinedMode ? combinedBtn : `${frontalBtn}${sagittalBtn}`}
+        ${combinedMode ? combinedBtn : `${frontalBtn}${sagittalBtn}${thirdBtn}`}
         ${hasVideo && !analyzed ? `<button class="btn btn-outline btn-sm" data-action="analyze" data-id="${s.id}">Run Analysis</button>` : ''}
         ${analyzed ? `
         <button class="btn btn-primary btn-sm" data-action="view" data-id="${s.id}">View Report</button>

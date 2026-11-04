@@ -106,7 +106,7 @@ _MP_JOINT_NAMES = {
 }
 
 
-def _export_pose2sim_keypoints(project_dir, track_f, track_s):
+def _export_pose2sim_keypoints(project_dir, track_f, track_s, track_t=None):
     """Write the extracted 2D keypoints as Pose2Sim consumable flat files.
 
     Pose2Sim triangulates from precomputed 2D keypoint *files* rather than
@@ -124,6 +124,8 @@ def _export_pose2sim_keypoints(project_dir, track_f, track_s):
     downstream triangulator only sees real measurements.
     """
     cam_order = (("frontal", track_f), ("sagittal", track_s))
+    if track_t and track_t.get("status") == "ok":
+        cam_order = cam_order + (("third", track_t),)
     keyed = {}
     audit = {}
     for cam, tr in cam_order:
@@ -165,10 +167,12 @@ def _export_pose2sim_keypoints(project_dir, track_f, track_s):
         os.replace(tmp, os.path.join(kp_dir, "2d_keypoints.py"))
 
     dump_py()
-    for cam, tr in (("frontal", track_f), ("sagittal", track_s)):
+    for cam, tr in cam_order:
         with open(os.path.join(kp_dir, f"{cam}_keypoints.json"), "w",
                   encoding="utf-8") as fh:
             json.dump(audit[cam], fh, indent=2)
+    third_line = ("- `third_keypoints.json` — same auditable mirror for the third "
+                  "(Coronal) camera view.\n") if (track_t and track_t.get("status") == "ok") else ""
     with open(os.path.join(kp_dir, "README.md"), "w", encoding="utf-8") as fh:
         fh.write(
             "# Pose2Sim 2D keypoints (BRC Gait Lab export)\n\n"
@@ -177,6 +181,7 @@ def _export_pose2sim_keypoints(project_dir, track_f, track_s):
             "  index to a dict of MediaPipe joint name -> (x, y, confidence).\n"
             "- `<cam>_keypoints.json` — auditable mirror of the same data plus\n"
             "  video metadata (fps, pixel frame size) used by the solve config.\n"
+            f"{third_line}"
             "- The numerical solve runs inside Pose2Sim when the package is\n"
             "  installed; otherwise the bundled `brc-lightweight` orthographic\n"
             "  triangulator produces the 3D kinematics in the same block.\n")
@@ -237,31 +242,55 @@ def _median_landmarks(landmarks):
     return med
 
 
-def _reconstruct(landmarks_f, landmarks_s, wf, hf, ws, hs, ref_scale):
-    """Orthographic dual-view triangulation of shared samples.
+def _reconstruct(landmarks_f, landmarks_s, wf, hf, ws, hs, ref_scale,
+                 landmarks_t=None, wt=0, ht=0):
+    """Multi-view orthographic triangulation via per-coordinate least-squares.
 
-    world = ( (u_frontal - cx_f)/S, (v_frontal - cy_f)/S, (u_sagittal - cx_s)/S )
-    with S = ref_scale (torso height in pixels, averaged across views). Returns a
-    list of per-sample dicts {joint: {L: (x,y,z), R: (...)}}.
+    Each view projects 3D world (X, Y, Z) onto 2D image (u, v) under an
+    orthographic model:
+
+      frontal : u ≈ X + cx_f,  v ≈ Y + cy_f        (side-to-side, up-down)
+      sagittal: u ≈ Z + cx_s,  v ≈ Y + cy_s        (forward-back, up-down)
+      third   : u ≈ X + cx_t,  v ≈ Y + cy_t        (redundant X/Y constraint)
+
+    With S = ref_scale (median torso height across views, in pixels), each
+    observed coordinate contributes an equation. Per coordinate we take the
+    mean of all views that measured it, which is the least-squares solution
+    under equal per-view noise. Returns a list of per-sample dicts
+    {joint: {L: (x,y,z), R: (...)}}.
     """
     cx_f, cy_f = wf / 2.0, hf / 2.0
     cx_s, cy_s = ws / 2.0, hs / 2.0
+    cx_t, cy_t = (wt / 2.0, ht / 2.0) if (landmarks_t and wt and ht) else (0.0, 0.0)
+    have_t = landmarks_t is not None and wt and ht
     n = min(len(landmarks_f), len(landmarks_s))
+    if have_t:
+        n = min(n, len(landmarks_t))
     out = []
     for i in range(n):
         lf = landmarks_f[i]["pts"]
         ls = landmarks_s[i]["pts"]
+        lt = landmarks_t[i]["pts"] if have_t else None
         world = {"L": {}, "R": {}}
         for s in ("L", "R"):
             for joint in PANTRY_JOINTS:
                 pf = lf.get(s, {}).get(joint)
                 ps = ls.get(s, {}).get(joint)
+                pt = lt.get(s, {}).get(joint) if have_t else None
                 if pf is None or ps is None:
                     continue
-                x = (pf[0] - cx_f) / ref_scale
-                y = (pf[1] - cy_f) / ref_scale
-                z = (ps[0] - cx_s) / ref_scale
-                world[s][joint] = (float(x), float(y), float(z))
+                # Least-squares per coordinate across available views.
+                xs = [(pf[0] - cx_f)]
+                ys = [(pf[1] - cy_f), (ps[1] - cy_s)]
+                zs = [(ps[0] - cx_s)]
+                if have_t and pt is not None:
+                    xs.append(pt[0] - cx_t)
+                    ys.append(pt[1] - cy_t)
+                x = sum(xs) / len(xs)
+                y = sum(ys) / len(ys)
+                z = sum(zs) / len(zs)
+                world[s][joint] = (float(x / ref_scale), float(y / ref_scale),
+                                   float(z / ref_scale))
         out.append(world)
     return out
 
@@ -393,11 +422,13 @@ def _anatomy_plot(med_f, med_s, artifacts):
 
 
 def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
-                      report_progress=None):
-    """Full dual-view triangulation workflow. Returns the `cv3d` result block.
+                      third_abs=None, report_progress=None):
+    """Full multi-view triangulation workflow. Returns the `cv3d` result block.
 
-    2e.txt item 1: when both planes are uploaded, construct a unified 3D
-    kinematic pipeline instead of two independent single-plane tracks.
+    2e.txt item 1: when two or more planes are uploaded, construct a unified 3D
+    kinematic pipeline. With a third (Coronal/Third) camera view, least-squares
+    triangulation across all available views reduces parallax error versus the
+    two-view orthographic solve.
     """
     def prog(pct, phase):
         if report_progress is not None:
@@ -407,9 +438,9 @@ def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
         os.makedirs(artifacts, exist_ok=True)
 
     base = {"status": "not_run", "engine": "brc-3d",
-            "mode": "dual-view-3d",
+            "mode": "multi-view-3d",
             "anatomical_note":
-                "Both planes were provided, so the multi-view pipeline was requested. "
+                "Two or more planes were provided, so the multi-view pipeline was requested. "
                 "Coordinates are normalized (torso heights) because planar recordings "
                 "carry no metric calibration."}
 
@@ -418,15 +449,29 @@ def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
         base["note"] = "Requires both frontal and sagittal videos."
         return base
 
-    prog(48, "Multi-view pipeline: keypoint extraction (both planes)")
+    # 2.md — third plane (Coronal) is optional; triangulation improves with it
+    # but is not gated on it.
+    if third_abs and not os.path.exists(third_abs):
+        third_abs = None
+
+    prog(48, "Multi-view pipeline: keypoint extraction (all planes)")
     track_s = _extract_track(sagittal_video, "sagittal")
     track_f = _extract_track(frontal_video, "frontal")
+    track_t = None
+    if third_abs:
+        _report_progress(50, "Multi-view pipeline: keypoint extraction (third/coronal plane)")
+        track_t = _extract_track(third_abs, "third")
     if track_s.get("status") != "ok" or track_f.get("status") != "ok":
         base["status"] = "error"
         base["error"] = " ".join(filter(None, [
             track_s.get("error"), track_f.get("error")])) or "could not extract keypoints"
         return base
-    if track_s["samples"] < 6 or track_f["samples"] < 6:
+    min_samples = min(track_s["samples"], track_f["samples"])
+    if track_t and track_t.get("status") == "ok":
+        min_samples = min(min_samples, track_t["samples"])
+    elif track_t and track_t.get("status") != "ok":
+        track_t = None  # third view unusable — fall back to dual-view
+    if min_samples < 6:
         base["status"] = "error"
         base["error"] = "Too few tracked frames in one or both views for triangulation."
         return base
@@ -436,7 +481,7 @@ def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
     engine = "brc-multiview-3d" if p2s and p2s.get("status") == "configured" else "brc-3d"
     if p2s and p2s.get("status") == "configured":
         exported = _export_pose2sim_keypoints(
-            os.path.join(artifacts, "pose2sim"), track_f, track_s)
+            os.path.join(artifacts, "pose2sim"), track_f, track_s, track_t)
         p2s["keypoints_exported"] = exported
         p2s["note"] = ("BRC multi-view 3D calibration workspace initialized and "
                        "2D keypoints exported under artifacts/pose2sim/2d_keypoints.")
@@ -453,6 +498,8 @@ def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
         return vals
 
     heights = torso_heights(track_f) + torso_heights(track_s)
+    if track_t and track_t.get("status") == "ok":
+        heights += torso_heights(track_t)
     ref_scale = float(np.median(heights)) if heights else 1.0
     if ref_scale <= 1e-6:
         ref_scale = 1.0
@@ -460,7 +507,10 @@ def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
     world_series = _reconstruct(track_f["landmarks"], track_s["landmarks"],
                                 track_f["width"], track_f["height"],
                                 track_s["width"], track_s["height"],
-                                ref_scale)
+                                ref_scale,
+                                track_t["landmarks"] if (track_t and track_t.get("status") == "ok") else None,
+                                track_t["width"] if track_t else 0,
+                                track_t["height"] if track_t else 0)
 
     sag_angles = _angles_from_world(world_series)
     front_angles = _frontal_angles_from_world(world_series)
@@ -532,20 +582,28 @@ def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
 
     prog(86, "Multi-view pipeline: 3D kinematics assembled")
 
+    cam_entries = {
+        "frontal": {"width": track_f["width"], "height": track_f["height"]},
+        "sagittal": {"width": track_s["width"], "height": track_s["height"]},
+    }
+    if track_t and track_t.get("status") == "ok":
+        cam_entries["third"] = {"width": track_t["width"], "height": track_t["height"]}
+
     return {
         "status": "ok",
         "engine": engine,
-        "mode": "dual-view-3d",
+        "mode": "tri-view-3d" if (track_t and track_t.get("status") == "ok") else "dual-view-3d",
         "samples": n,
         "fps_frontal": track_f["fps"],
         "fps_sagittal": track_s["fps"],
+        "fps_third": track_t["fps"] if (track_t and track_t.get("status") == "ok") else None,
         "calibration": {
-            "model": "orthographic-dual-view",
-            "cameras": {"frontal": {"width": track_f["width"], "height": track_f["height"]},
-                        "sagittal": {"width": track_s["width"], "height": track_s["height"]}},
+            "model": "orthographic-least-squares",
+            "cameras": cam_entries,
             "units": "normalized (torso heights)",
             "reference_scale_px": round(ref_scale, 1),
             "multiview": p2s,
+            "third_view_used": bool(track_t and track_t.get("status") == "ok"),
         },
         "joints_3d": joints_3d,
         "joint_angles_3d": {name: sag_angles["stats"][name] for name in sag_angles["stats"]},
@@ -556,8 +614,9 @@ def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
         "plots": {"sim3d_anatomy": anat, "sim3d_angles": angle_plot},
         "anatomical_note":
             "Full-body 3D joint coordinates, segment lengths (normalized to torso height) and "
-            "3D joint angles were reconstructed by triangulating the frontal and sagittal 2D "
-            "keypoints. Use alongside the single-plane report; confirm with clinical review.",
+            "3D joint angles were reconstructed by least-squares triangulation across the "
+            "available camera views (frontal + sagittal, plus third/Coronal when provided). "
+            "Use alongside the single-plane report; confirm with clinical review.",
     }
 
 
