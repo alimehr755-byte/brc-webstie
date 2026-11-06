@@ -1,0 +1,30 @@
+# BRC Gait Lab — Python engine runtime dependencies
+# -----------------------------------------------------------------------------
+# Core tier (required): powers the MediaPipe pose-estimation analysis in
+# gait_lab.py, the gait-validity pre-screen (gait_validity.py), anthropometry and
+# the dual-view 3D reconstruction (cv3d.py).
+#
+# Optional tier (j.txt — SMPL-X hybrid refinement): declared but intentionally
+# NOT part of the default install so the engine keeps running on MediaPipe-only
+# output without the large torch / smplx downloads. Enable it only when the body
+# models are wanted:
+#
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+#     pip install smplx
+#
+# Then download SMPLX_NEUTRAL/MALE/FEMALE.npz into "gait lab/models/smplx/"
+# following "gait lab/SETUP_SMPLX.md" and verify with
+# "python \"gait lab/check_smplx_setup.py\"".
+# -----------------------------------------------------------------------------
+
+numpy
+opencv-python
+mediapipe
+pandas
+scipy
+matplotlib
+
+# --- Optional SMPL-X hybrid tier (round-trip compatible with the core tier) ---
+# torch
+# torchvision
+# smplx

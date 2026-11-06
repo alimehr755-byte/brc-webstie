@@ -10,6 +10,26 @@ import pandas as pd
 import numpy as np
 from gait_engine import run_gait_analysis
 
+# j.txt — optional SMPL-X hybrid refinement availability probe (graceful). The
+# production engine lives in ../python; the folder name contains a space, so we
+# load it by path instead of by import name. If anything is missing the app just
+# shows "off" and continues on the MediaPipe-only pipeline.
+try:
+    import importlib.util as _ilu
+    import sys as _sys
+    _smplx_abs = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "python", "smplx_refine.py"))
+    if os.path.isfile(_smplx_abs):
+        _spec = _ilu.spec_from_file_location("smplx_refine", _smplx_abs)
+        _smplx_refine = _ilu.module_from_spec(_spec)
+        _sys.modules.setdefault("smplx_refine", _smplx_refine)
+        _spec.loader.exec_module(_smplx_refine)
+        _SMPL_STATE, _SMPL_REASON = _smplx_refine.probe()
+    else:
+        _SMPL_STATE, _SMPL_REASON = "off", "smplx_refine.py not found"
+except Exception as _smplx_exc:
+    _SMPL_STATE, _SMPL_REASON = "off", "smplx_refine import failed: %s" % _smplx_exc
+
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="Orthopedic Eye - Gait & Postural Analysis",
@@ -44,6 +64,7 @@ st.markdown('<div class="sub-header">Computer Vision Kinematics & Sagittal Gait 
 # --- SIDEBAR CONTROL PANEL ---
 with st.sidebar:
     st.header("Control Panel")
+    st.caption("SMPL-X hybrid refinement: %s" % ("on" if _SMPL_STATE == "on" else "off"))
     st.markdown("---")
     
     uploaded_file = st.file_uploader(

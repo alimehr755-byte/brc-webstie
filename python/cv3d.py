@@ -422,7 +422,7 @@ def _anatomy_plot(med_f, med_s, artifacts):
 
 
 def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
-                      third_abs=None, report_progress=None):
+                      third_abs=None, report_progress=None, smplx_3d=None):
     """Full multi-view triangulation workflow. Returns the `cv3d` result block.
 
     2e.txt item 1: when two or more planes are uploaded, construct a unified 3D
@@ -439,6 +439,7 @@ def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
 
     base = {"status": "not_run", "engine": "brc-3d",
             "mode": "multi-view-3d",
+            "smplx3d": None,
             "anatomical_note":
                 "Two or more planes were provided, so the multi-view pipeline was requested. "
                 "Coordinates are normalized (torso heights) because planar recordings "
@@ -589,10 +590,18 @@ def run_multi_view_3d(sagittal_video, frontal_video, artifacts, session_id,
     if track_t and track_t.get("status") == "ok":
         cam_entries["third"] = {"width": track_t["width"], "height": track_t["height"]}
 
+    # j.txt guarded SMPL-X hybrid block
+    smplx3d = None
+    if smplx_3d and isinstance(smplx_3d, dict) and smplx_3d.get("refined"):
+        smplx3d = {"status": "ok", "refined": True, "engine": "mediapipe+smplx",
+                   "planes": smplx_3d.get("planes"),
+                   "note": "SMPL-X body-pose refinement"} 
+
     return {
         "status": "ok",
         "engine": engine,
         "mode": "tri-view-3d" if (track_t and track_t.get("status") == "ok") else "dual-view-3d",
+        "smplx3d": smplx3d, 
         "samples": n,
         "fps_frontal": track_f["fps"],
         "fps_sagittal": track_s["fps"],

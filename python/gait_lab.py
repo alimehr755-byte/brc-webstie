@@ -1470,6 +1470,12 @@ import anthropometry  # noqa: E402
 # NOTE: overlay_ocr is intentionally NOT imported here. OCR is deferred to
 # report export and spawned on-demand by routes/gait.js (python/overlay_ocr.py).
 
+# j.txt — optional SMPL-X hybrid refinement. Graceful: the module imports cleanly
+# without torch/smplx and reports "disabled" until the body models + packages are
+# installed (see 'gait lab/SETUP_SMPLX.md'). It only refines tracks already in
+# TRACK_CACHE, so the MediaPipe stage is never re-run or weakened by it.
+import smplx_refine  # noqa: E402
+
 
 # Running-adapted phase model (percent of the running gait cycle). Running has
 # a flight phase and no double support; stance drops to ~40% and swing dominates.
@@ -2606,6 +2612,11 @@ def main():
         height_cm = None
     _tick("arg_parse")
 
+    # j.txt — startup capability notice for the optional SMPL-X hybrid stage.
+    _smplx_state, _smplx_reason = smplx_refine.probe()
+    print("SMPL-X refinement module: %s (%s)" % (_smplx_state, _smplx_reason),
+          file=sys.stderr, flush=True)
+
     _frontal_name = args.frontal or ""
     _sag_name = args.sagittal or ""
     _combined_name = args.combined if args.combined and args.combined.strip().lower() != "none" else ""
@@ -2690,6 +2701,11 @@ def main():
         result["integrity"] = _build_integrity(None, None, result["anthropometry"], name_metadata)
         result["input"]["height_cm"] = height_cm
         result["input"]["height_source"] = "clinician-measured" if height_cm else "uncalibrated"
+        # j.txt — blocked analyses carry a disabled (not missing) SMPL-X block so the
+        # result schema stays uniform for the exporting/rendering layers.
+        result["smplx"] = {"status": "disabled", "refined": False,
+                           "reason": "analysis blocked at the gait-validity gate",
+                           "availability": {"state": _smplx_state, "reason": _smplx_reason}}
         _report_progress(100, "Analysis blocked — not a valid walking recording")
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(_json_clean(result), fh, ensure_ascii=False, indent=2, allow_nan=False)
@@ -2841,6 +2857,14 @@ def main():
     result["smplx"] = smplx_block
     _tick("derive_graphs")
 
+    # j.txt — hybrid SMPL-X refinement over the cached MediaPipe tracks. Run once
+    # here (after both planes are analyzed) and reused below for the cv3d block and
+    # the top-level result["smplx"]. Never raises; degrades to a disabled block.
+    _report_progress(89, "SMPL-X hybrid refinement (%s)" % _smplx_state)
+    smplx_block = smplx_refine.refine_all(TRACK_CACHE, height_cm=height_cm)
+    smplx_block["availability"] = {"state": _smplx_state, "reason": _smplx_reason}
+    _tick("smplx")
+
     # 2e.txt item 1 — multi-view 3D pipeline: when BOTH planes are available,
     # route through the Pose2Sim-style triangulation workflow (cv3d module).
     # 3e.txt — a combined capture routes here automatically once its halves are split.
@@ -2854,7 +2878,8 @@ def main():
             from cv3d import run_multi_view_3d
             cv3d = run_multi_view_3d(sagittal_abs, frontal_abs, artifacts, args.session,
                                      third_abs=third_abs,
-                                     report_progress=_report_progress)
+                                     report_progress=_report_progress,
+                                     smplx_3d=smplx_block)
         except Exception as exc:  # pragma: no cover
             cv3d = {"status": "error", "mode": "multi-view-3d",
                     "anatomical_note":
@@ -2880,6 +2905,7 @@ def main():
                                            result["anthropometry"], name_metadata)
     result["input"]["height_cm"] = height_cm
     result["input"]["height_source"] = "clinician-measured" if height_cm else "uncalibrated"
+    result["smplx"] = smplx_block
 
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(_json_clean(result), fh, ensure_ascii=False, indent=2, allow_nan=False)
