@@ -40,12 +40,16 @@ if (process.env.PERSIST_DIR) {
 
 // CORS for the native mobile app (Capacitor WebView origins) plus any configured
 // web origins. The web site itself is same-origin and unaffected.
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'https://localhost,capacitor://localhost,https://capacitor.local')
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'https://localhost,http://localhost,http://127.0.0.1,https://127.0.0.1,capacitor://localhost,https://capacitor.local')
   .split(',').map((s) => s.trim()).filter(Boolean);
 app.use(cors({
   origin(origin, cb) {
-    if (!origin) return cb(null, true); // non-browser / curl
-    if (CORS_ORIGINS.includes(origin)) return cb(null, true);
+    if (!origin) return cb(null, true); // non-browser / curl / same-origin
+    const originLow = String(origin).toLowerCase();
+    // Allow localhost / 127.0.0.1 on any port for local development
+    if (originLow.includes('localhost') || originLow.includes('127.0.0.1')) return cb(null, true);
+    const allowed = CORS_ORIGINS.split(',').map(s => s.trim().toLowerCase());
+    if (allowed.includes(originLow)) return cb(null, true);
     const envApproved = (process.env.CORS_ALLOW_ANY === 'true');
     return cb(envApproved ? null : new Error('CORS: origin not allowed.'), envApproved);
   },

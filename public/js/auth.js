@@ -11,6 +11,14 @@ document.addEventListener('DOMContentLoaded', () => {
   if (loginForm) {
     loginForm.addEventListener('submit', handleLogin);
   }
+  // Show/hide password toggle
+  const showPwdToggle = document.getElementById('show-password-toggle');
+  const pwdInput = document.getElementById('password');
+  if (showPwdToggle && pwdInput) {
+    showPwdToggle.addEventListener('change', () => {
+      pwdInput.type = showPwdToggle.checked ? 'text' : 'password';
+    });
+  }
 });
 
 async function handleSignup(e) {
