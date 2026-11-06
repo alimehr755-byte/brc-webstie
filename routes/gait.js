@@ -80,11 +80,30 @@ function sniffVideoContainer(absPath) {
   }
 }
 
+// Helper: resolve the organized storage directory for a session.
+// Structure: uploads/gait/{patient_name}/{date}/session_{id}/
+// Falls back to UPLOAD_DIR for legacy sessions (backward compat).
+function sessionStorageDir(sessionId) {
+  try {
+    const row = db.prepare('SELECT user_id, created_at FROM gait_sessions WHERE id = ?').get(sessionId);
+    if (!row) return UPLOAD_DIR;
+    const user = db.prepare('SELECT child_name FROM users WHERE id = ?').get(row.user_id);
+    const patientName = (user && user.child_name) || 'Unknown';
+    const safeName = String(patientName).replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'Unknown';
+    const date = (row.created_at || '').split(' ')[0] || new Date().toISOString().split('T')[0];
+    const dir = path.join(UPLOAD_DIR, safeName, date, 'session_' + sessionId);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  } catch (e) {
+    return UPLOAD_DIR;
+  }
+}
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  destination: (req, file, cb) => cb(null, sessionStorageDir(req.params.id)),
   filename: (req, file, cb) => {
     const ext = (path.extname(file.originalname) || '.mp4').toLowerCase();
-    cb(null, `session-${req.params.id}-${file.fieldname}-${Date.now()}${ext}`);
+    cb(null, file.fieldname + ext);
   }
 });
 
@@ -306,8 +325,11 @@ async function runAnalyzer(session) {
 
   // Real computer-vision path (MediaPipe pose, frontal + sagittal planes).
     const labPath = path.join(__dirname, '..', 'python', 'gait_lab.py');
-    const artifactsRelDir = `uploads/gait/artifacts/${session.id}`;
-    const artifactsAbsDir = path.join(__dirname, '..', artifactsRelDir);
+    // Organize artifacts under the session's patient/date directory (2.md + local-only
+    // data layout: uploads/gait/{patient_name}/{date}/session_{id}/artifacts/).
+    const sessDir = sessionStorageDir(session.id);
+    const artifactsRelDir = path.relative(path.join(__dirname, '..'), path.join(sessDir, 'artifacts')).replace(/\\/g, '/');
+    const artifactsAbsDir = path.join(sessDir, 'artifacts');
     if (!fs.existsSync(artifactsAbsDir)) fs.mkdirSync(artifactsAbsDir, { recursive: true });
 
     const resolveVideo = rel => {
@@ -1014,6 +1036,12 @@ router.delete('/sessions/:id', requireAuth, (req, res) => {
   });
   const analysisFile = path.join(UPLOAD_DIR, `analysis-${row.id}.json`);
   if (fs.existsSync(analysisFile)) { try { fs.unlinkSync(analysisFile); } catch (e) { /* noop */ } }
+  // Clean up the organized session directory (patient/date/session_{id}/)
+  const sessDir = sessionStorageDir(row.id);
+  if (sessDir !== UPLOAD_DIR && fs.existsSync(sessDir)) {
+    try { fs.rmSync(sessDir, { recursive: true, force: true }); } catch (e) { /* noop */ }
+  }
+  // Also clean up legacy artifact directory
   const artifactDir = path.join(ARTIFACTS_ROOT, String(row.id));
   if (fs.existsSync(artifactDir)) { try { fs.rmSync(artifactDir, { recursive: true, force: true }); } catch (e) { /* noop */ } }
 
