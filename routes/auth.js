@@ -31,7 +31,7 @@ function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     req.userId = payload.userId;
-    const row = db.prepare('SELECT id, guardian_name, username, role, status, must_change_password FROM users WHERE id = ?').get(payload.userId);
+    const row = db.prepare('SELECT id, guardian_name, username, email, role, status, must_change_password FROM users WHERE id = ?').get(payload.userId);
     if (!row) return res.status(401).json({ error: 'Account no longer exists.' });
     if (row.status !== 'active') {
       return res.status(403).json({ error: 'Your account is not active. Contact the Bonsai Rehabilitation Center.' });
@@ -44,7 +44,7 @@ function requireAuth(req, res, next) {
         return res.status(403).json({ error: 'You must set a new password before continuing.', code: 'PASSWORD_CHANGE_REQUIRED' });
       }
     }
-    req.session = { user: { id: row.id, guardian_name: row.guardian_name, username: row.username, role: row.role, status: row.status } };
+    req.session = { user: { id: row.id, guardian_name: row.guardian_name, username: row.username, email: row.email, role: row.role, status: row.status } };
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Session expired. Please log in again.' });

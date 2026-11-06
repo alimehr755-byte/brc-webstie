@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 // server.js
 // Entry point for the Bonsai Rehabilitation Center website.
 // Serves static frontend files + REST API for auth / appointments / contact.
@@ -15,6 +17,7 @@ const assessmentsRouter = require('./routes/assessments');
 const blogRouter = require('./routes/blog');
 const researchRouter = require('./routes/research');
 const gaitRouter = require('./routes/gait');
+const scalesRouter = require('./routes/scales');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -61,6 +64,7 @@ app.use('/api/assessments', assessmentsRouter);
 app.use('/api/blog', blogRouter);
 app.use('/api/research', researchRouter);
 app.use('/api/gait', gaitRouter);
+app.use('/api/scales', scalesRouter);
 
 // Fallback 404 for unknown API routes
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
