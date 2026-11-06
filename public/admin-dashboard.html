@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Staff Dashboard | Bonsai Rehabilitation Center</title>
 <link rel="stylesheet" href="/css/style.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="/vendor/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -29,6 +29,7 @@
       <a href="#blog" class="admin-nav-link" data-target="blog">📝 Blog</a>
       <a href="#research" class="admin-nav-link" data-target="research">📚 Research</a>
       <a href="#gait" class="admin-nav-link" data-target="gait">🚶 Gait Lab</a>
+      <a href="#scales" class="admin-nav-link" data-target="scales">⚖️ Scales</a>
       <span class="nav-section-label" id="nav-label-account">Account</span>
       <a href="#settings" class="admin-nav-link" data-target="settings">⚙️ Settings</a>
       <a href="/change-password.html">🔑 Change Password</a>
@@ -167,8 +168,8 @@
           </div>
         </div>
         <table class="admin-table">
-          <thead><tr><th>Patient</th><th>Therapy</th><th>Mode</th><th>Preferred Date</th><th>Requested</th><th>Status</th></tr></thead>
-          <tbody id="appointments-body"><tr><td colspan="6">Loading...</td></tr></tbody>
+          <thead><tr><th>Patient</th><th>Therapy</th><th>Mode</th><th>Preferred Date</th><th>Requested</th><th>Status</th><th></th></tr></thead>
+          <tbody id="appointments-body"><tr><td colspan="7">Loading...</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -185,8 +186,8 @@
           </div>
         </div>
         <table class="admin-table">
-          <thead><tr><th>Guardian</th><th>Child</th><th>Flagged Areas</th><th>Submitted</th><th>Status</th><th></th></tr></thead>
-          <tbody id="assessments-body"><tr><td colspan="6">Loading...</td></tr></tbody>
+          <thead><tr><th>Guardian</th><th>Child</th><th>Flagged Areas</th><th>Submitted</th><th>Status</th><th></th><th></th></tr></thead>
+          <tbody id="assessments-body"><tr><td colspan="7">Loading...</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -389,6 +390,64 @@
         </table>
       </div>
     </section>
+
+    <!-- CLINICAL SCALES SECTION (BBS / TUG / GMFCS / OGA) -->
+    <section id="section-scales" style="display:none;">
+      <div class="admin-table-card">
+        <div class="table-head">
+          <h3>Clinical Scales</h3>
+          <span class="status-badge status-confirmed">Functional assessment records</span>
+        </div>
+        <p class="mb-24" style="opacity:0.75; font-size:.9rem;">
+          Structured scoring for the <strong>Berg Balance Scale</strong> (14 items), <strong>Timed Up &amp; Go</strong>,
+          <strong>GMFCS-E&amp;R</strong> classification and the digital <strong>Rancho Los Amigos Observational Gait
+          Analysis</strong> checklist. All interpretation is produced offline by the BRC scale engines
+          (<em>python/bbs_engine.py</em> · <em>scales_registry.py</em>) and stored verbatim — with full citation
+          provenance (<a href="/docs/references/SOURCES.md" target="_blank" rel="noopener">SOURCES.md</a>).
+        </p>
+        <div class="alert alert-error" style="display:flex; gap:10px; align-items:flex-start; margin-bottom:16px;">
+          <span>⚠️</span>
+          <div>
+            <strong>Safety reminder.</strong> Balance testing requires physical supervision.
+            Fit the safety gait belt before items 5, 8, 9, 11, 12, 13 and 14, keep the spotter
+            within arm's reach, and never score from assumptions or patient self-report —
+            score only observed performance.
+          </div>
+        </div>
+
+        <div class="form-row" style="max-width:460px;">
+          <label for="scales-patient">Patient</label>
+          <select id="scales-patient"><option value="">Loading patients…</option></select>
+        </div>
+
+        <div class="filter-pills mb-24 mt-16" id="scales-type-pills">
+          <button class="filter-pill active" data-scale="bbs">Berg Balance Scale</button>
+          <button class="filter-pill" data-scale="tug">Timed Up &amp; Go</button>
+          <button class="filter-pill" data-scale="gmfcs">GMFCS-E&amp;R</button>
+          <button class="filter-pill" data-scale="oga">OGA Checklist</button>
+        </div>
+
+        <div id="scales-form-wrap">
+          <h4 class="mb-8" id="scales-form-title">Berg Balance Scale (BBS) — 14 items, 0–4 each</h4>
+          <div id="scales-form-body"></div>
+          <div class="form-row mt-16" style="max-width:560px;">
+            <label for="scales-notes">Session notes (optional)</label>
+            <textarea id="scales-notes" rows="2" maxlength="2000" placeholder="Observed conditions, footwear, assistive device used, spotter present…"></textarea>
+          </div>
+          <div class="mt-16" style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn btn-primary" id="scales-save-btn">Save &amp; Auto-Score</button>
+            <span id="scales-save-msg" class="form-msg" style="display:none;"></span>
+          </div>
+        </div>
+
+        <h4 class="mt-24 mb-8" id="scales-records-title">Records for this patient</h4>
+        <table class="admin-table">
+          <thead><tr><th>Scale</th><th>Status</th><th>Result</th><th>Assessor</th><th>Date</th><th></th></tr></thead>
+          <tbody id="scales-body"><tr><td colspan="6" class="empty-state">Select a patient.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
     <section id="section-settings" style="display:none;">
       <div class="admin-table-card">
         <div class="table-head">

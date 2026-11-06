@@ -22,7 +22,8 @@ const {
 const { getClinic } = require('../config/clinic-info');
 const {
   VIEWS, SECTION_VIEWS, ROLE_VIEWS, ROLE_DEFAULT_VIEW,
-  viewForRole, allowedViews, canPreview, isStaffRole
+  viewForRole, allowedViews, canPreview, isStaffRole,
+  sectionVisibleForView,
 } = require('../config/view-matrix');
 
 // ---- local audit helper (mirrors the admin.js logAudit signature) ----
@@ -114,6 +115,15 @@ function serialize(row, includeResults = false) {
 
 function safeJson(text) {
   try { return JSON.parse(text); } catch (e) { return null; }
+}
+
+// View-matrix helper: resolve the view ID for a user (from query param or
+// default view for their role). Used by report routes to filter sections.
+function viewForUser(role, requestedView) {
+  if (requestedView && VIEWS.some(v => v.id === requestedView)) {
+    return requestedView;
+  }
+  return viewForRole(role) || 'v1';
 }
 
 function relUploadPath(absPath) {
@@ -1370,6 +1380,12 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   const r = row.results;
   const clinic = getClinic();
 
+  // View-matrix sync: honor ?view= query param or fall back to the user's
+  // default view. Sections are filtered per config/view-matrix.js so that the
+  // exported PDF matches what the user is authorized to see in the UI.
+  const requestedView = req.query.view || viewForUser(user.role);
+  const viewSection = (sectionId) => sectionVisibleForView(sectionId, requestedView);
+
   // run.txt §1 — name overlay verification runs ONLY here, on export. OCR is
   // deliberately not part of analysis; it happens when the clinician clicks
   // "Export PDF" / "Export Word". The result is attached in-memory (not stored).
@@ -1442,7 +1458,7 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   }
 
   // ---- beginner-friendly summary (easy-read first, plain language) ----
-  if (r.beginner_summary) {
+  if (viewSection('summary_easy') && r.beginner_summary) {
     const bs = r.beginner_summary || {};
     doc.moveDown(0.4);
     doc.fontSize(13).fillColor('#1E3C82').text('Beginner-Friendly Summary (Easy Read)');
@@ -1472,7 +1488,7 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   }
 
   // ---- clinical impression ----
-  if (r.summary) {
+  if (viewSection('clinical_impression') && r.summary) {
     doc.fontSize(13).fillColor('#1E3C82').text('Clinical Impression');
     doc.moveDown(0.4);
     doc.rect(50, doc.y, 495, 2).fill('#E1EEF8');
@@ -1491,10 +1507,11 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   }
 
   // ---- cycle summary ----
-  doc.fontSize(13).fillColor('#1E3C82').text('Gait Cycle Summary');
-  doc.moveDown(0.4);
-  const hasCycle = typeof r.cycle.stance_pct === 'number' && Number.isFinite(r.cycle.stance_pct);
-  if (hasCycle) {
+  if (viewSection('cycle_summary')) {
+    doc.fontSize(13).fillColor('#1E3C82').text('Gait Cycle Summary');
+    doc.moveDown(0.4);
+    const hasCycle = typeof r.cycle.stance_pct === 'number' && Number.isFinite(r.cycle.stance_pct);
+    if (hasCycle) {
     const stanceW = Math.max(6, r.cycle.stance_pct * 4.5);
     doc.rect(50, doc.y, 495, 18).fill('#F0F7FC');
     doc.rect(50, doc.y, stanceW, 18).fill('#46B4DC');
@@ -1514,21 +1531,24 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
     doc.moveDown(0.15);
     doc.fontSize(8).fillColor('#258DC1').text(r.cycle.playback_note, { width: 495 });
   }
+  } // end cycle_summary
 
   // ---- phase table ----
-  doc.moveDown(0.8);
-  doc.fontSize(13).fillColor('#1E3C82').text('Stance & Swing Sub-Phases');
-  doc.moveDown(0.4);
-  const phaseRows = r.cycle.phases.map(p => {
+  if (viewSection('phase_table')) {
+    doc.moveDown(0.8);
+    doc.fontSize(13).fillColor('#1E3C82').text('Stance & Swing Sub-Phases');
+    doc.moveDown(0.4);
+    const phaseRows = r.cycle.phases.map(p => {
     const range = Array.isArray(p.norm_range_pct) ? `${p.norm_range_pct[0]}–${p.norm_range_pct[1]}%` : '';
     const status = p.flag === 'none' ? 'Normal' : `${p.classification || p.flag}${p.severity ? ' · ' + p.severity : ''}`;
     return [p.name, p.type, `${p.pct_of_cycle}%`, `${p.duration_ms} ms`, range, status];
   });
   let y = drawTable(doc, ['Phase', 'Type', '% of cycle', 'Duration', 'Norm range', 'Status'], phaseRows, [170, 60, 70, 70, 80, 75], doc.y);
   doc.y = y;
+  } // end phase_table
 
   // ---- anomalies ----
-  if (r.cycle.anomalies.length) {
+  if (viewSection('anomalies') && r.cycle.anomalies.length) {
     doc.moveDown(0.4);
     doc.fontSize(13).fillColor('#1E3C82').text('Detected Anomalies');
     doc.moveDown(0.4);
@@ -1540,8 +1560,9 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   }
 
   // ---- deformities ----
-  doc.moveDown(0.6);
-  doc.fontSize(13).fillColor('#1E3C82').text('Multi-Planar Deformity & Biomechanical Analysis');
+  if (viewSection('deformities')) {
+    doc.moveDown(0.6);
+    doc.fontSize(13).fillColor('#1E3C82').text('Multi-Planar Deformity & Biomechanical Analysis');
   doc.moveDown(0.4);
   doc.fontSize(10).fillColor('#232520').text('Frontal plane');
   (r.profile.frontal.deformities || []).forEach(d => doc.fontSize(9).fillColor('#232520').text(`• ${d.name} (${d.magnitude}${d.category ? ' · ' + d.category : ''}) — ${d.description}`, { width: 495 }));
@@ -1552,17 +1573,20 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   doc.fontSize(10).fillColor('#232520').text('Rotational / transverse plane');
   (r.profile.rotational ? r.profile.rotational.deformities || [] : []).forEach(d => doc.fontSize(9).fillColor('#232520').text(`• ${d.name} (${d.magnitude}${d.category ? ' · ' + d.category : ''}) — ${d.description}`, { width: 495 }));
   doc.fontSize(7.5).fillColor('#5A5D55').text('Findings classified as structural (bony/alignment), functional (timing/muscle-driven) or rotational (transverse-plane torsion).', { width: 495 });
+  } // end deformities
 
   // ---- ROM ----
-  doc.moveDown(0.6);
-  doc.fontSize(13).fillColor('#1E3C82').text('Joint Kinematics (Range of Motion)');
-  doc.moveDown(0.4);
-  const romRows = r.kinematics.rom.map(x => [x.joint, x.movement, x.normal, x.observed]);
-  y = drawTable(doc, ['Joint', 'Movement', 'Reference ROM', 'Observed'], romRows, [70, 165, 150, 120], doc.y);
-  doc.y = y;
+  if (viewSection('rom')) {
+    doc.moveDown(0.6);
+    doc.fontSize(13).fillColor('#1E3C82').text('Joint Kinematics (Range of Motion)');
+    doc.moveDown(0.4);
+    const romRows = r.kinematics.rom.map(x => [x.joint, x.movement, x.normal, x.observed]);
+    y = drawTable(doc, ['Joint', 'Movement', 'Reference ROM', 'Observed'], romRows, [70, 165, 150, 120], doc.y);
+    doc.y = y;
+  } // end rom
 
   // ---- Anthropometry (run.txt section 2) ----
-  if (r.anthropometry) {
+  if (viewSection('anthropometry') && r.anthropometry) {
     doc.moveDown(0.6);
     doc.fontSize(13).fillColor('#1E3C82').text('Anthropometric Measurements');
     doc.moveDown(0.4);
@@ -1594,8 +1618,9 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   }
 
   // ---- muscles ----
-  doc.moveDown(0.4);
-  doc.fontSize(13).fillColor('#1E3C82').text('Muscle Involvement Map');
+  if (viewSection('muscles')) {
+    doc.moveDown(0.4);
+    doc.fontSize(13).fillColor('#1E3C82').text('Muscle Involvement Map');
   doc.moveDown(0.4);
   doc.fontSize(9).fillColor('#B3452F').text('Overactive / overworked:');
   (r.muscles.overactive || []).forEach(m => doc.fontSize(9).fillColor('#232520').text(`• ${m.name} — ${m.role}`, { width: 495 }));
@@ -1620,12 +1645,14 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
     doc.moveDown(0.2);
     (r.muscles.notes || []).forEach(n => doc.fontSize(7.5).fillColor('#5A5D55').text(`- ${n}`));
   }
+  } // end muscles
 
   // ---- prescriptions ----
-  doc.moveDown(0.6);
-  doc.fontSize(13).fillColor('#1E3C82').text('Targeted Clinical Prescriptions');
-  doc.moveDown(0.4);
-  if (r.prescriptions.rationale) {
+  if (viewSection('prescriptions')) {
+    doc.moveDown(0.6);
+    doc.fontSize(13).fillColor('#1E3C82').text('Targeted Clinical Prescriptions');
+    doc.moveDown(0.4);
+    if (r.prescriptions.rationale) {
     doc.fontSize(8.5).fillColor('#2F7A4D').text(r.prescriptions.rationale, { width: 495 });
     doc.moveDown(0.3);
   }
@@ -1669,8 +1696,10 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   doc.moveDown(0.3);
   (r.prescriptions.guidance || []).forEach(g => doc.fontSize(8.5).fillColor('#5A5D55').text(`- ${g}`));
 
+  } // end prescriptions
+
   // ---- predictive progression & prognosis (item 4) ----
-  if (r.prediction) {
+  if (viewSection('prediction') && r.prediction) {
     const pr = r.prediction;
     doc.moveDown(0.6);
     doc.fontSize(13).fillColor('#1E3C82').text('Predictive Progression & Prognostic Model');
@@ -1728,7 +1757,7 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   }
 
   // ---- multi-view 3D kinematics (2e.txt items 1 & 4) ----
-  if (r.cv3d && r.cv3d.status === 'ok') {
+  if (viewSection('cv3d') && r.cv3d && r.cv3d.status === 'ok') {
     const c3 = r.cv3d;
     const tri = Boolean((c3.calibration || {}).third_view_used);
     doc.moveDown(0.6);
@@ -1777,8 +1806,9 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   }
 
   // ---- clinical sign-off block (run.txt section 5) ----
-  doc.moveDown(0.8);
-  doc.rect(50, doc.y, 495, 2).fill('#1E3C82');
+  if (viewSection('sign_off')) {
+    doc.moveDown(0.8);
+    doc.rect(50, doc.y, 495, 2).fill('#1E3C82');
   doc.moveDown(0.4);
   doc.fontSize(13).fillColor('#1E3C82').text('Clinical Sign-Off');
   doc.moveDown(0.4);
@@ -1793,12 +1823,14 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   doc.text('Signature: ___________________________   Date: ____________');
   doc.moveDown(0.2);
   doc.fontSize(8).fillColor('#5A5D55').text('This report is generated by the BRC Biomechanical Engine and must be reviewed and signed by a qualified clinician.', { width: 495 });
+  } // end sign_off
 
   // ---- references (core + per-category evidence, 1e.txt item 5) ----
-  doc.moveDown(0.6);
-  doc.fontSize(13).fillColor('#1E3C82').text('References');
-  doc.moveDown(0.4);
-  const refSections = r.reference_sections || { core: r.references || [], supporting: [] };
+  if (viewSection('references')) {
+    doc.moveDown(0.6);
+    doc.fontSize(13).fillColor('#1E3C82').text('References');
+    doc.moveDown(0.4);
+    const refSections = r.reference_sections || { core: r.references || [], supporting: [] };
   const REF_CATEGORIES = [
     ['core', 'Core gait-analysis references'],
     ['deformity', 'Evidence — deformity & alignment detection'],
@@ -1818,11 +1850,14 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
       if (ref.topics && ref.topics.length) doc.fontSize(7.5).fillColor('#258DC1').text(`   Relevant to: ${ref.topics.map(t => t.replace(/-/g, ' ')).join(', ')}`, { width: 495 });
     });
   });
+  } // end references
 
   // ---- functional assessment appendix (clinical scales × gait) ----
-  const reportScales = loadScalesForReport(row.user_id);
-  const reportCrosscheck = crosscheckBbsGait(reportScales, r);
-  addFunctionalAssessmentPdf(doc, reportScales, reportCrosscheck);
+  if (viewSection('clinical_impression') || viewSection('scales')) {
+    const reportScales = loadScalesForReport(row.user_id);
+    const reportCrosscheck = crosscheckBbsGait(reportScales, r);
+    addFunctionalAssessmentPdf(doc, reportScales, reportCrosscheck);
+  }
 
   addFooters(doc);
   doc.end();
@@ -1834,6 +1869,12 @@ router.get('/sessions/:id/report.docx', requireAuth, async (req, res) => {
   const { row, user } = ctx;
   const r = row.results;
   const clinic = getClinic();
+
+  // View-matrix sync: honor ?view= query param or fall back to the user's
+  // default view. Sections are filtered per config/view-matrix.js so that the
+  // exported DOCX matches what the user is authorized to see in the UI.
+  const requestedView = req.query.view || viewForUser(user.role);
+  const viewSection = (sectionId) => sectionVisibleForView(sectionId, requestedView);
 
   // run.txt §1 — name overlay verification runs ONLY here, on export. OCR is
   // deliberately not part of analysis; it happens when the clinician clicks
