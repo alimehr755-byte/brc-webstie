@@ -2425,4 +2425,176 @@ function addFooters(doc) {
   }
 }
 
+// ---- Research Portal: coronal plane population analysis ----
+// GET /research/populations — count of analyzed sessions by diagnosis
+router.get('/research/populations', requireAuth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT u.diagnosis, COUNT(*) AS session_count
+    FROM gait_sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL
+    GROUP BY u.diagnosis
+    ORDER BY session_count DESC
+  `).all();
+  const total = rows.reduce((sum, r) => sum + r.session_count, 0);
+  res.json({ populations: rows, total });
+});
+
+// GET /research/coronal — aggregate coronal metrics by diagnosis
+// Query params: population (diagnosis filter), metric (specific metric name)
+router.get('/research/coronal', requireAuth, (req, res) => {
+  const population = req.query.population || null;
+  const metric = req.query.metric || null;
+
+  const rows = db.prepare(`
+    SELECT s.id, s.user_id, s.created_at, u.diagnosis, u.child_name, s.age_years, s.gender, s.results
+    FROM gait_sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL
+    ${population ? "AND u.diagnosis = ?" : ""}
+    ORDER BY s.created_at ASC
+  `).all(...(population ? [population] : []));
+
+  const sessions = rows.map(r => {
+    const res = safeJson(r.results) || {};
+    const cv = res.cv || {};
+    const frontal = cv.frontal || {};
+    const metrics = frontal.metrics || {};
+    const cp = res.cp_knee || {};
+    const sides = cp.sides || {};
+    return {
+      session_id: r.id,
+      user_id: r.user_id,
+      diagnosis: r.diagnosis,
+      child_name: r.child_name,
+      age_years: r.age_years,
+      gender: r.gender,
+      created_at: r.created_at,
+      pelvic_obliquity_mean: metrics.pelvic_obliquity_mean,
+      pelvic_obliquity_max: metrics.pelvic_obliquity_max,
+      lateral_trunk_lean_max: metrics.lateral_trunk_lean_max,
+      knee_valgus_mean: metrics.knee_valgus_mean,
+      knee_valgus_off_max: metrics.knee_valgus_off_max,
+      step_width_mean: metrics.step_width_mean,
+      weight_shift_max: metrics.weight_shift_max,
+      shoulder_asymmetry_index: metrics.shoulder_asymmetry_index,
+      head_lateral_tilt_max: metrics.head_lateral_tilt_max,
+      shoulder_drop_max: metrics.shoulder_drop_max,
+      cp_pattern_L: sides.L ? sides.L.pattern : null,
+      cp_pattern_R: sides.R ? sides.R.pattern : null,
+      cp_confidence: cp.confidence || null,
+      custom_angles: frontal.custom_angles || {},
+    };
+  });
+
+  // Aggregate by diagnosis
+  const byDiagnosis = {};
+  sessions.forEach(s => {
+    const dx = s.diagnosis || 'Unknown';
+    if (!byDiagnosis[dx]) byDiagnosis[dx] = [];
+    byDiagnosis[dx].push(s);
+  });
+
+  const summary = Object.entries(byDiagnosis).map(([dx, sess]) => {
+    const metrics = ['pelvic_obliquity_mean', 'lateral_trunk_lean_max', 'knee_valgus_mean',
+      'step_width_mean', 'weight_shift_max', 'shoulder_asymmetry_index'];
+    const agg = {};
+    metrics.forEach(m => {
+      const vals = sess.map(s => s[m]).filter(v => v != null && Number.isFinite(v));
+      if (vals.length) {
+        const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+        const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length);
+        agg[m] = { mean: Math.round(mean * 100) / 100, sd: Math.round(sd * 100) / 100, n: vals.length };
+      } else {
+        agg[m] = { mean: null, sd: null, n: 0 };
+      }
+    });
+    return { diagnosis: dx, session_count: sess.length, metrics: agg };
+  });
+
+  res.json({ sessions, summary, total: sessions.length });
+});
+
+// GET /research/compare — compare coronal metrics between two populations
+router.get('/research/compare', requireAuth, (req, res) => {
+  const pop1 = req.query.pop1 || null;
+  const pop2 = req.query.pop2 || null;
+  const metric = req.query.metric || 'pelvic_obliquity_mean';
+
+  if (!pop1 || !pop2) {
+    return res.status(400).json({ error: 'Both pop1 and pop2 are required.' });
+  }
+
+  const getVals = (pop) => {
+    const rows = db.prepare(`
+      SELECT s.results, u.diagnosis
+      FROM gait_sessions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL
+        AND u.diagnosis = ?
+    `).all(pop);
+    return rows.map(r => {
+      const res = safeJson(r.results) || {};
+      const metrics = (res.cv && res.cv.frontal && res.cv.frontal.metrics) || {};
+      return metrics[metric];
+    }).filter(v => v != null && Number.isFinite(v));
+  };
+
+  const vals1 = getVals(pop1);
+  const vals2 = getVals(pop2);
+
+  const mean1 = vals1.length ? vals1.reduce((a, b) => a + b, 0) / vals1.length : null;
+  const mean2 = vals2.length ? vals2.reduce((a, b) => a + b, 0) / vals2.length : null;
+  const sd1 = vals1.length ? Math.sqrt(vals1.reduce((a, b) => a + (b - mean1) ** 2, 0) / vals1.length) : null;
+  const sd2 = vals2.length ? Math.sqrt(vals2.reduce((a, b) => a + (b - mean2) ** 2, 0) / vals2.length) : null;
+
+  // Cohen's d effect size
+  let cohensD = null;
+  if (vals1.length >= 2 && vals2.length >= 2) {
+    const pooledSD = Math.sqrt(((vals1.length - 1) * sd1 ** 2 + (vals2.length - 1) * sd2 ** 2) / (vals1.length + vals2.length - 2));
+    if (pooledSD > 0) {
+      cohensD = Math.round(((mean1 - mean2) / pooledSD) * 100) / 100;
+    }
+  }
+
+  res.json({
+    metric,
+    pop1: { diagnosis: pop1, n: vals1.length, mean: mean1 ? Math.round(mean1 * 100) / 100 : null, sd: sd1 ? Math.round(sd1 * 100) / 100 : null, values: vals1 },
+    pop2: { diagnosis: pop2, n: vals2.length, mean: mean2 ? Math.round(mean2 * 100) / 100 : null, sd: sd2 ? Math.round(sd2 * 100) / 100 : null, values: vals2 },
+    cohens_d: cohensD,
+    effect_size: cohensD != null ? (Math.abs(cohensD) < 0.2 ? 'negligible' : (Math.abs(cohensD) < 0.5 ? 'small' : (Math.abs(cohensD) < 0.8 ? 'medium' : 'large'))) : null,
+  });
+});
+
+// GET /research/export — export research data to CSV
+router.get('/research/export', requireAuth, (req, res) => {
+  const population = req.query.population || null;
+  const rows = db.prepare(`
+    SELECT s.id, s.user_id, s.created_at, u.diagnosis, u.child_name, s.age_years, s.gender, s.results
+    FROM gait_sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL
+    ${population ? "AND u.diagnosis = ?" : ""}
+    ORDER BY s.created_at ASC
+  `).all(...(population ? [population] : []));
+
+  const csvLines = ['session_id,patient_id,diagnosis,age_years,gender,created_at,pelvic_obliquity_mean,lateral_trunk_lean_max,knee_valgus_mean,step_width_mean,weight_shift_max,shoulder_asymmetry_index,cp_pattern_L,cp_pattern_R'];
+  rows.forEach(r => {
+    const res = safeJson(r.results) || {};
+    const metrics = (res.cv && res.cv.frontal && res.cv.frontal.metrics) || {};
+    const cp = res.cp_knee || {};
+    const sides = cp.sides || {};
+    csvLines.push([
+      r.id, r.user_id, r.diagnosis || '', r.age_years || '', r.gender || '', r.created_at,
+      metrics.pelvic_obliquity_mean, metrics.lateral_trunk_lean_max, metrics.knee_valgus_mean,
+      metrics.step_width_mean, metrics.weight_shift_max, metrics.shoulder_asymmetry_index,
+      sides.L ? sides.L.pattern : '', sides.R ? sides.R.pattern : '',
+    ].join(','));
+  });
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="coronal_research_${population || 'all'}_${new Date().toISOString().split('T')[0]}.csv"`);
+  res.send(csvLines.join('\n'));
+});
+
 module.exports = router;
