@@ -306,7 +306,8 @@ function setupCreateBtn() {
           ageYears: document.getElementById('gait-age')?.value || '',
           gender: document.getElementById('gait-gender')?.value || '',
           bodyMassKg: document.getElementById('gait-body-mass')?.value || '',
-          clinicianName: document.getElementById('gait-clinician')?.value || ''
+          clinicianName: document.getElementById('gait-clinician')?.value || '',
+          diagnosis: document.getElementById('gait-diagnosis')?.value || ''
         })
       });
       const data1 = await res1.json();

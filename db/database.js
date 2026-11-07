@@ -279,3 +279,11 @@ if (!scaleCols.includes('related_session_id')) {
 }
 
 module.exports = db;
+
+// Research cohort diagnosis per session (added for Research Portal filters).
+try {
+  const _gaitColsDx = db.prepare("PRAGMA table_info(gait_sessions)").all().map(c => c.name);
+  if (!_gaitColsDx.includes("diagnosis")) {
+    db.exec("ALTER TABLE gait_sessions ADD COLUMN diagnosis TEXT");
+  }
+} catch (e) { /* ignore */ }

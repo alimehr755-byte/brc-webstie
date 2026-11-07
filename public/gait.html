@@ -175,8 +175,21 @@
         <p class="mt-8" id="combined-name" style="font-size:.8rem; color:var(--sage-700);"></p>
       </div>
     </div>
-    <div class="field mt-16">
-      <label for="gait-notes">Notes for the clinical team</label>
+  <div class="field mt-16">
+    <label for="gait-diagnosis">Clinical diagnosis / condition <span style="color:var(--ink-500); font-weight:400;">(for research cohort)</span></label>
+    <select id="gait-diagnosis">
+      <option value="">Not specified</option>
+      <option value="Cerebral palsy">Cerebral palsy (CP child)</option>
+      <option value="Autism">Autism spectrum</option>
+      <option value="Epilepsy">Epilepsy-associated gait disorder</option>
+      <option value="Amputee">Post-traumatic amputee</option>
+      <option value="Stroke">Stroke / hemiplegic</option>
+      <option value="Healthy control">Healthy control</option>
+      <option value="Other">Other</option>
+    </select>
+  </div>
+  <div class="field mt-16">
+    <label for="gait-notes">Notes for the clinical team</label>
       <textarea id="gait-notes" placeholder="e.g. wearing shoes, walked 8 steps, has been using a DAFO for 2 months"></textarea>
     </div>
     <div class="field mt-16">

@@ -117,7 +117,7 @@ const upload = multer({
   }
 });
 
-const SESSION_FIELDS = 'id, user_id, status, frontal_video, sagittal_video, frontal_name, sagittal_name, combined_video, combined_name, third_video, third_name, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name, results, analyzer_meta, review_note, reviewed_by, reviewed_at, created_at, updated_at';
+const SESSION_FIELDS = 'id, user_id, status, frontal_video, sagittal_video, frontal_name, sagittal_name, combined_video, combined_name, third_video, third_name, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name, diagnosis, results, analyzer_meta, review_note, reviewed_by, reviewed_at, created_at, updated_at';
 
 function serialize(row, includeResults = false) {
   const s = { ...row };
@@ -570,6 +570,11 @@ function normalizeGender(raw) {
   const allowed = ['male', 'female', 'other', 'unspecified'];
   return allowed.includes(s) ? s : null;
 }
+function normalizeDiagnosis(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim().slice(0, 120);
+  return s || null;
+}
 
 router.post('/sessions', requireAuth, (req, res) => {
   const notes = String(req.body.notes || '').trim().slice(0, 2000);
@@ -581,9 +586,10 @@ router.post('/sessions', requireAuth, (req, res) => {
   const gender = normalizeGender(req.body.gender);
   const bodyMassKg = normalizeBodyMass(req.body.bodyMassKg);
   const clinicianName = String(req.body.clinicianName || '').trim().slice(0, 200) || null;
+  const diagnosis = normalizeDiagnosis(req.body.diagnosis);
   const result = db.prepare(
-    "INSERT INTO gait_sessions (user_id, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(req.userId, notes, hint, heightCm, ageYears, gender, bodyMassKg, clinicianName);
+    "INSERT INTO gait_sessions (user_id, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name, diagnosis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(req.userId, notes, hint, heightCm, ageYears, gender, bodyMassKg, clinicianName, diagnosis);
   res.status(201).json({ success: true, id: result.lastInsertRowid, message: 'Gait session created. Upload your videos.' });
 });
 
@@ -2437,7 +2443,7 @@ router.get('/research/populations', requireAuth, (req, res) => {
   if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
   if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
   const rows = db.prepare(`
-    SELECT u.diagnosis, COUNT(*) AS session_count
+    SELECT COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, COUNT(*) AS session_count
     FROM gait_sessions s
     JOIN users u ON u.id = s.user_id
     ${where}
@@ -2458,13 +2464,13 @@ router.get('/research/coronal', requireAuth, (req, res) => {
 
   let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL";
   const params = [];
-  if (population) { where += " AND u.diagnosis = ?"; params.push(population); }
+  if (population) { where += "       AND COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) = ?"; params.push(population); }
   if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
   if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
   if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
 
   const rows = db.prepare(`
-    SELECT s.id, s.user_id, s.created_at, u.diagnosis, u.child_name, s.age_years, s.gender, s.results
+    SELECT s.id, s.user_id, s.created_at, COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, u.child_name, s.age_years, s.gender, s.results
     FROM gait_sessions s
     JOIN users u ON u.id = s.user_id
     ${where}
@@ -2559,7 +2565,7 @@ router.get('/research/compare', requireAuth, (req, res) => {
   const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
 
   const getVals = (pop) => {
-    let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL AND u.diagnosis = ?";
+    let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL       AND COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) = ?";
     const params = [pop];
     if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
     if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
@@ -2612,13 +2618,13 @@ router.get('/research/export', requireAuth, (req, res) => {
 
   let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL";
   const params = [];
-  if (population) { where += " AND u.diagnosis = ?"; params.push(population); }
+  if (population) { where += "       AND COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) = ?"; params.push(population); }
   if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
   if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
   if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
 
   const rows = db.prepare(`
-    SELECT s.id, s.user_id, s.created_at, u.diagnosis, u.child_name, s.age_years, s.gender, s.results
+    SELECT s.id, s.user_id, s.created_at, COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, u.child_name, s.age_years, s.gender, s.results
     FROM gait_sessions s
     JOIN users u ON u.id = s.user_id
     ${where}
