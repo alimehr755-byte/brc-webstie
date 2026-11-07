@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<script src="/js/mobile.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Coronal Plane Research Portal | Bonsai Rehabilitation Center</title>
+<meta name="description" content="Coronal plane gait research across populations: counts, comparison, export.">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.gait-bar { height: 18px; background: #F0F7FC; border-radius: 9px; overflow: hidden; display: flex; }
+  .gait-stance { background: #46B4DC; height: 100%; }
+  .gait-swing { background: #9fc3e0; height: 100%; }
+  .phase-row { display: grid; grid-template-columns: 1fr 90px 80px 80px 80px 80px 100px; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px dashed #E1EEF8; font-size: .88rem; }
+  .phase-row.phase-head { grid-template-columns: 1fr 90px 80px 80px 80px 80px 100px; font-weight:600; }
+  .phase-timeline { display:flex; height:26px; border-radius:8px; overflow:hidden; margin:12px 0 4px; }
+  .phase-seg { display:flex; align-items:center; justify-content:center; font-size:.62rem; font-weight:700; color:#0e1b14; white-space:nowrap; border-right:1px solid rgba(0,0,0,.15); min-width:0; }
+  .phase-seg:last-child { border-right:none; }
+  .seg-stance { background:#46B4DC; }
+  .seg-swing { background:#9fc3e0; }
+  .delta-ok { color:var(--sage-700); }
+  .delta-pos { color:#B3452F; }
+  .delta-neg { color:#258DC1; }
+  .gait-legend { display:flex; gap:16px; font-size:.78rem; color:var(--ink-600); margin-top:6px; }
+  .gait-legend .dot { width:10px; height:10px; border-radius:2px; display:inline-block; margin-right:5px; vertical-align:middle; }
+  .flag-chip { display:inline-block; padding:2px 8px; border-radius:99px; font-size:.72rem; font-weight:600; text-transform:capitalize; }
+  .flag-prolonged { background:#FDF3E3; color:#C99436; }
+  .flag-accelerated { background:#E8F4FD; color:#258DC1; }
+  .flag-missing { background:#FBE9E4; color:#B3452F; }
+  .flag-normal { background:#EAF6EE; color:#2F7A4D; }
+  .sev-major { border-left:3px solid #B3452F; padding-left:10px; }
+  .sev-moderate { border-left:3px solid #C99436; padding-left:10px; }
+  .sev-minor { border-left:3px solid #46B4DC; padding-left:10px; }
+  .upload-zone { border:2px dashed #cfe0ec; border-radius:12px; padding:22px; text-align:center; background:#FBFDFE; }
+  .upload-zone.hover { border-color:#46B4DC; background:#F0F7FC; }
+  .video-preview video { width:100%; border-radius:8px; background:#0e1b14; }
+  .cv-plane { background:#fff; border:1px solid #E1EEF8; border-radius:12px; padding:14px; }
+  .cv-plane h5 { margin:0; }
+  @media (max-width:760px) { .cv-plane { grid-column:1; } }
+  /* 2e.txt — gait-validity rejection notice + modal */
+  .gait-rejection-banner { background:#FDF3F1; border:1px solid #F1CFC9; border-left:4px solid #B3452F; border-radius:10px; padding:16px 18px; margin:6px 0 18px; }
+  .gait-rejection-banner h4 { color:#B3452F; }
+  #gait-rejection-modal { position:fixed; inset:0; background:rgba(14,27,20,.5); display:flex; align-items:center; justify-content:center; z-index:1200; padding:18px; }
+  #gait-rejection-modal[hidden] { display:none; }
+  #gait-rejection-modal .modal-card { background:#fff; border-radius:14px; max-width:540px; width:100%; padding:22px 24px; box-shadow:0 18px 50px rgba(14,27,20,.35); }
+  #gait-rejection-modal .modal-card h3 { margin:0 0 10px; color:#B3452F; font-size:1.05rem; }
+  #gait-rejection-modal .modal-card p { margin:0 0 12px; color:var(--ink-700); font-size:.92rem; line-height:1.5; }
+  #gait-rejection-modal .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
+  /* rules.md — metadata bar, KPI cards, plane tabs, collapsible integrity */
+  .gait-meta { background:#FBFDFE; border:1px solid #E1EEF8; border-radius:12px; padding:12px 14px; }
+  .gait-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:12px; }
+  .gait-kpi { background:#fff; border:1px solid #E1EEF8; border-radius:12px; padding:14px; box-shadow:0 2px 6px rgba(14,27,20,.05); align-self:start; }
+  .gait-kpi-label { font-size:.72rem; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:#1E3C82; margin:0; }
+  .gait-kpi-value { font-size:1.35rem; font-weight:700; color:#1E3C82; margin:6px 0 0; }
+  .gait-tabs { display:flex; gap:6px; flex-wrap:wrap; border-bottom:2px solid #E1EEF8; padding-bottom:8px; }
+  .gait-tab { padding:8px 14px; border-radius:9px; border:1px solid #E1EEF8; background:#FBFDFE; font-weight:600; font-size:.86rem; color:var(--ink-600); cursor:pointer; }
+  .gait-tab:hover { background:#F0F7FC; }
+  .gait-tab.active { background:#1E3C82; border-color:#1E3C82; color:#fff; }
+  .gait-tab-panel { display:none; margin-top:14px; }
+  .gait-tab-panel[data-default="1"] { display:block; }
+  .gait-details { border:1px solid #E1EEF8; background:#FBFDFE; border-radius:12px; padding:12px 14px; }
+  .gait-details summary { cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap; list-style:none; }
+  .gait-details summary::-webkit-details-marker { display:none; }
+  .gait-details summary::before { content:'▸'; color:#258DC1; font-size:.9rem; transition:transform .15s ease; }
+  .gait-details[open] summary::before { transform:rotate(90deg); }
+  /* multi-view switcher (staff preview) */
+  .view-switch-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#FBFDFE; border:1px solid #E1EEF8; border-radius:12px; padding:8px 12px; margin-bottom:6px; }
+  .view-switch-label { font-size:.78rem; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:var(--ink-500); }
+  .view-switch-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+  .view-switch { cursor:pointer; }
+  .view-switch:disabled { opacity:.5; cursor:not-allowed; }
+  /* SVG stride timeline */
+  .stride-timeline { background:#FBFDFE; border:1px solid #E1EEF8; border-radius:10px; padding:8px 10px; }
+  .stride-timeline svg { width:100%; height:auto; display:block; }
+  .stride-seg { cursor:pointer; outline:none; }
+  .stride-seg:hover rect { stroke:#1E3C82; stroke-width:2; }
+  .stride-seg.selected rect { stroke:#1E3C82; stroke-width:2.5; filter:drop-shadow(0 1px 2px rgba(14,27,20,.25)); }
+  .stride-seg.flagged rect { stroke:#B3452F; }
+  /* symmetry dials */
+  .dial-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-top:10px; }
+  .dial { background:#fff; border:1px solid #E1EEF8; border-radius:12px; padding:8px 6px 10px; text-align:center; align-self:start; }
+  .dial svg { width:100%; height:auto; max-height:96px; }
+  .dial-label { font-size:.76rem; font-weight:700; color:#1E3C82; margin-top:2px; }
+  .dial-sub { font-size:.68rem; color:var(--ink-500); }
+  /* QA warnings */
+  .qa-warnings { background:#FDF3F1; border:1px solid #F1CFC9; border-left:4px solid #B3452F; border-radius:10px; padding:12px 14px; }
+  /* OCR panel + chips */
+  .gait-details-card { background:#fff; border:1px solid #E1EEF8; border-radius:12px; padding:12px 14px; }
+  .ocr-chip { display:inline-block; background:#E8F4FD; color:#1E3C82; border-radius:99px; padding:2px 8px; font-size:.72rem; margin:2px 2px 0 0; }
+  .ocr-seen { font-size:.78rem; color:var(--ink-500); }
+  /* JSON viewer + diff */
+  .json-view { background:#0e1b14; color:#E8F4FD; border-radius:10px; padding:12px 14px; font-size:.74rem; line-height:1.5; overflow-x:auto; max-height:420px; overflow-y:auto; }
+  .json-view .j-key { color:#46B4DC; }
+  .json-view .j-str { color:#A8D5A2; }
+  .json-view .j-num { color:#EBD7A8; }
+  .json-view .j-bool { color:#C99436; font-weight:700; }
+  .j-del { color:#B3452F; font-weight:600; }
+  .gait-details select, .gait-details button { vertical-align:middle; }
+  /* progression grid */
+  .prog-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; align-items:start; }
+  /* diff modal */
+  .diff-overlay { position:fixed; inset:0; background:rgba(14,27,20,.55); display:flex; align-items:center; justify-content:center; z-index:1300; padding:18px; }
+  .diff-overlay .modal-card { background:#fff; border-radius:14px; max-width:760px; width:100%; padding:20px 22px; box-shadow:0 18px 50px rgba(14,27,20,.35); }
+  .diff-overlay .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:12px; }
+  @media (prefers-reduced-motion: reduce) { .stride-seg, .view-switch { transition:none !important; } }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-inner">
+    <a href="/index.html" class="brand">
+      <img src="/images/logo.png" alt="Bonsai Rehabilitation Center" class="brand-logo">
+    </a>
+    <button class="nav-toggle" aria-label="Toggle menu">&#9776;</button>
+    <ul class="nav-links">
+      <li><a href="/index.html">Home</a></li>
+      <li><a href="/about.html">About Us</a></li>
+      <li><a href="/services.html">Services</a></li>
+      <li><a href="/blog.html">Blog</a></li>
+      <li><a href="/research.html">Research</a></li>
+      <li><a href="/contact.html">Contact</a></li>
+      <li><a href="/assessment.html">Online Assessment</a></li>
+      <li><a href="/gait.html">Gait Lab</a></li>
+      <li id="nav-auth-slot" style="display:flex; gap:20px; align-items:center;">
+        <a href="/login.html">Log in</a>
+        <a href="/signup.html" class="nav-cta">Book an Appointment</a>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<header class="dash-header">
+  <div class="container">
+    <div>
+      <h1>Coronal Plane Research Portal</h1>
+      <p>Population counts, group comparison, and export of coronal gait metrics from analyzed sessions. Opens in its own page (no blocking popup).</p>
+    </div>
+    <div style="margin-top:12px;">
+      <a class="btn btn-ghost" href="/gait.html">Back to Gait Lab</a>
+    </div>
+  </div>
+</header>
+
+<div class="dash-body container">
+  <div class="card card-lg mb-24">
+    <div id="research-portal-body">
+      <p class="empty-state">Loading research data...</p>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div class="container">
+    <div class="footer-bottom">
+      <span>&copy; 2026 Bonsai Rehabilitation Center. All rights reserved.</span>
+      <span>Growing every child's potential, together.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/js/main.js"></script>
+<script src="/js/research_portal.js"></script>
+</body>
+</html>
