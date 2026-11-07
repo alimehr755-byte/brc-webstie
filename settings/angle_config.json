@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "description": "Custom joint angle configuration for BRC Gait Lab. Each angle is defined by a name, three landmarks (proximal, joint, distal) or one segment against vertical/horizontal, the plane, sign convention, and optional zero offset.",
+  "sagittal": [
+    {"name": "hip_flexion", "proximal": "shoulder", "joint": "hip", "distal": "knee", "plane": "sagittal", "convention": "flexion_positive", "zero_offset": 0, "description": "Hip flexion/extension angle"},
+    {"name": "knee_flexion", "proximal": "hip", "joint": "knee", "distal": "ankle", "plane": "sagittal", "convention": "flexion_positive", "zero_offset": 0, "description": "Knee flexion/extension angle"},
+    {"name": "ankle_angle", "proximal": "knee", "joint": "ankle", "distal": "foot", "plane": "sagittal", "convention": "dorsiflexion_positive", "zero_offset": 0, "description": "Ankle dorsiflexion/plantarflexion angle"},
+    {"name": "shoulder_flexion", "proximal": "hip", "joint": "shoulder", "distal": "elbow", "plane": "sagittal", "convention": "flexion_positive", "zero_offset": 0, "description": "Shoulder flexion/extension angle"},
+    {"name": "elbow_flexion", "proximal": "shoulder", "joint": "elbow", "distal": "wrist", "plane": "sagittal", "convention": "flexion_positive", "zero_offset": 0, "description": "Elbow flexion/extension angle"}
+  ],
+  "frontal": [
+    {"name": "pelvic_obliquity", "proximal": "left_hip", "joint": "pelvis", "distal": "right_hip", "plane": "frontal", "convention": "right_drop_positive", "zero_offset": 0, "description": "Pelvic obliquity (tilt of pelvis in frontal plane)"},
+    {"name": "trunk_lean", "proximal": "hip_mid", "joint": "trunk", "distal": "shoulder_mid", "plane": "frontal", "convention": "right_lean_positive", "zero_offset": 0, "description": "Lateral trunk lean relative to vertical"},
+    {"name": "knee_valgus", "proximal": "hip", "joint": "knee", "distal": "ankle", "plane": "frontal", "convention": "valgus_positive", "zero_offset": 0, "description": "Frontal knee alignment (valgus/varus)"},
+    {"name": "step_width", "proximal": "left_ankle", "joint": "base", "distal": "right_ankle", "plane": "frontal", "convention": "width_positive", "zero_offset": 0, "description": "Step width (base of support)"},
+    {"name": "hip_abduction", "proximal": "pelvis", "joint": "hip", "distal": "knee", "plane": "frontal", "convention": "abduction_positive", "zero_offset": 0, "description": "Hip abduction/adduction angle"},
+    {"name": "shoulder_abduction", "proximal": "shoulder", "joint": "shoulder", "distal": "elbow", "plane": "frontal", "convention": "abduction_positive", "zero_offset": 0, "description": "Shoulder abduction/adduction in frontal plane"},
+    {"name": "ankle_foot_align", "proximal": "knee", "joint": "ankle", "distal": "foot", "plane": "frontal", "convention": "eversion_positive", "zero_offset": 0, "description": "Ankle-foot alignment (rearfoot eversion/inversion)"},
+    {"name": "head_lateral_tilt", "proximal": "shoulder_mid", "joint": "head", "distal": "ear_mid", "plane": "frontal", "convention": "right_tilt_positive", "zero_offset": 0, "description": "Head lateral tilt relative to shoulders"}
+  ]
+}

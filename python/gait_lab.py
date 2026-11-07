@@ -1062,6 +1062,39 @@ def _write_sagittal_overlay(video_path, frame_indices, raw_landmarks, events, se
     return None
 
 
+
+def _compute_custom_coronal_angles(raw_landmarks, width, height):
+    """Compute custom coronal angles from raw landmarks using angle_config.json.
+
+    Returns a dict of {angle_name: median_angle_value} or {} if no config.
+    All angles are labelled "estimated" (2D markerless, not calibrated).
+    """
+    try:
+        import coronal_angles
+        config_path = os.path.join(os.path.dirname(__file__), "..", "settings", "angle_config.json")
+        config_path = os.path.normpath(config_path)
+        if not os.path.exists(config_path):
+            return {}
+        # Compute angles for each frame and take the median
+        all_angles = {}
+        for fr in (raw_landmarks or []):
+            pts = fr.get("pts", {})
+            if not pts or not pts.get("L") or not pts.get("R"):
+                continue
+            frame_angles = coronal_angles.compute_coronal_angles(pts, config_path)
+            for name, val in frame_angles.items():
+                if val is not None:
+                    all_angles.setdefault(name, []).append(val)
+        # Return median per angle
+        result = {}
+        for name, vals in all_angles.items():
+            if vals:
+                result[name] = round(float(np.median(vals)), 1)
+        return result
+    except Exception:
+        return {}
+
+
 def analyze_frontal(video_path, artifacts, session_id, step=None, start=0, speed_factor=1.0, running=False):
     """Frontal-plane pose analysis: pelvic obliquity, hip ab/adduction, knee varus/valgus, trunk lean, step width."""
     cap = cv2.VideoCapture(video_path)
@@ -1364,6 +1397,7 @@ def analyze_frontal(video_path, artifacts, session_id, step=None, start=0, speed
         "playback_speed": round(max(1e-3, float(speed_factor)), 3),
         "running": bool(running),
         "metrics": metrics,
+        "custom_angles": _compute_custom_coronal_angles(raw_landmarks, width, height),
         "confidence": {
             "threshold": CONF_GATE,
             "parameters": conf,
