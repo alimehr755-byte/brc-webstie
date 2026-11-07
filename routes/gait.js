@@ -2428,14 +2428,22 @@ function addFooters(doc) {
 // ---- Research Portal: coronal plane population analysis ----
 // GET /research/populations — count of analyzed sessions by diagnosis
 router.get('/research/populations', requireAuth, (req, res) => {
+  const gender = req.query.gender || null;
+  const ageMin = req.query.age_min ? Number(req.query.age_min) : null;
+  const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
+  let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL";
+  const params = [];
+  if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
+  if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
+  if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
   const rows = db.prepare(`
     SELECT u.diagnosis, COUNT(*) AS session_count
     FROM gait_sessions s
     JOIN users u ON u.id = s.user_id
-    WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL
+    ${where}
     GROUP BY u.diagnosis
     ORDER BY session_count DESC
-  `).all();
+  `).all(...params);
   const total = rows.reduce((sum, r) => sum + r.session_count, 0);
   res.json({ populations: rows, total });
 });
@@ -2444,16 +2452,24 @@ router.get('/research/populations', requireAuth, (req, res) => {
 // Query params: population (diagnosis filter), metric (specific metric name)
 router.get('/research/coronal', requireAuth, (req, res) => {
   const population = req.query.population || null;
-  const metric = req.query.metric || null;
+  const gender = req.query.gender || null;
+  const ageMin = req.query.age_min ? Number(req.query.age_min) : null;
+  const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
+
+  let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL";
+  const params = [];
+  if (population) { where += " AND u.diagnosis = ?"; params.push(population); }
+  if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
+  if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
+  if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
 
   const rows = db.prepare(`
     SELECT s.id, s.user_id, s.created_at, u.diagnosis, u.child_name, s.age_years, s.gender, s.results
     FROM gait_sessions s
     JOIN users u ON u.id = s.user_id
-    WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL
-    ${population ? "AND u.diagnosis = ?" : ""}
+    ${where}
     ORDER BY s.created_at ASC
-  `).all(...(population ? [population] : []));
+  `).all(...params);
 
   const sessions = rows.map(r => {
     const res = safeJson(r.results) || {};
@@ -2462,6 +2478,8 @@ router.get('/research/coronal', requireAuth, (req, res) => {
     const metrics = frontal.metrics || {};
     const cp = res.cp_knee || {};
     const sides = cp.sides || {};
+    const cycle = res.cycle || {};
+    const profile = res.profile || {};
     return {
       session_id: r.id,
       user_id: r.user_id,
@@ -2484,6 +2502,15 @@ router.get('/research/coronal', requireAuth, (req, res) => {
       cp_pattern_R: sides.R ? sides.R.pattern : null,
       cp_confidence: cp.confidence || null,
       custom_angles: frontal.custom_angles || {},
+      cadence: cycle.cadence_cycles_per_second != null ? cycle.cadence_cycles_per_second : null,
+      cycle_seconds: cycle.cycle_seconds != null ? cycle.cycle_seconds : null,
+      stance_pct: cycle.stance_pct != null ? cycle.stance_pct : null,
+      swing_pct: cycle.swing_pct != null ? cycle.swing_pct : null,
+      deformities: {
+        frontal: (profile.frontal && Array.isArray(profile.frontal.deformities)) ? profile.frontal.deformities : [],
+        sagittal: (profile.sagittal && Array.isArray(profile.sagittal.deformities)) ? profile.sagittal.deformities : [],
+        rotational: (profile.rotational && Array.isArray(profile.rotational.deformities)) ? profile.rotational.deformities : [],
+      },
     };
   });
 
@@ -2509,6 +2536,8 @@ router.get('/research/coronal', requireAuth, (req, res) => {
         agg[m] = { mean: null, sd: null, n: 0 };
       }
     });
+    const cadenceVals = sess.map(s => s.cadence).filter(v => v != null && Number.isFinite(v));
+    agg.cadence = cadenceVals.length ? { mean: Math.round((cadenceVals.reduce((a,b)=>a+b,0)/cadenceVals.length)*100)/100, n: cadenceVals.length } : { mean: null, n: 0 };
     return { diagnosis: dx, session_count: sess.length, metrics: agg };
   });
 
@@ -2525,14 +2554,22 @@ router.get('/research/compare', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Both pop1 and pop2 are required.' });
   }
 
+  const gender = req.query.gender || null;
+  const ageMin = req.query.age_min ? Number(req.query.age_min) : null;
+  const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
+
   const getVals = (pop) => {
+    let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL AND u.diagnosis = ?";
+    const params = [pop];
+    if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
+    if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
+    if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
     const rows = db.prepare(`
       SELECT s.results, u.diagnosis
       FROM gait_sessions s
       JOIN users u ON u.id = s.user_id
-      WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL
-        AND u.diagnosis = ?
-    `).all(pop);
+      ${where}
+    `).all(...params);
     return rows.map(r => {
       const res = safeJson(r.results) || {};
       const metrics = (res.cv && res.cv.frontal && res.cv.frontal.metrics) || {};
@@ -2569,14 +2606,24 @@ router.get('/research/compare', requireAuth, (req, res) => {
 // GET /research/export — export research data to CSV
 router.get('/research/export', requireAuth, (req, res) => {
   const population = req.query.population || null;
+  const gender = req.query.gender || null;
+  const ageMin = req.query.age_min ? Number(req.query.age_min) : null;
+  const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
+
+  let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL";
+  const params = [];
+  if (population) { where += " AND u.diagnosis = ?"; params.push(population); }
+  if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
+  if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
+  if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
+
   const rows = db.prepare(`
     SELECT s.id, s.user_id, s.created_at, u.diagnosis, u.child_name, s.age_years, s.gender, s.results
     FROM gait_sessions s
     JOIN users u ON u.id = s.user_id
-    WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL
-    ${population ? "AND u.diagnosis = ?" : ""}
+    ${where}
     ORDER BY s.created_at ASC
-  `).all(...(population ? [population] : []));
+  `).all(...params);
 
   const csvLines = ['session_id,patient_id,diagnosis,age_years,gender,created_at,pelvic_obliquity_mean,lateral_trunk_lean_max,knee_valgus_mean,step_width_mean,weight_shift_max,shoulder_asymmetry_index,cp_pattern_L,cp_pattern_R'];
   rows.forEach(r => {

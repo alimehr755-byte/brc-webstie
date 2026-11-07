@@ -1,226 +1,399 @@
-// ---- Coronal Plane Research Portal (standalone page) ----
-// Renders into #research-portal-body. No modal/popup is used.
-
+// ---- Coronal Plane Research Portal (comprehensive dashboard) ----
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = String(str == null ? '' : str);
   return div.innerHTML;
 }
 
-// Cache for research data to avoid re-fetching
-let _researchCache = null;
-let _researchCacheTime = 0;
-const RESEARCH_CACHE_TTL = 60000; // 1 minute
+const JOINT_METRICS = {
+  knee: ['knee_valgus_mean', 'knee_valgus_off_max'],
+  hip: ['pelvic_obliquity_mean', 'pelvic_obliquity_max'],
+  ankle: ['step_width_mean', 'weight_shift_max'],
+  pelvis: ['pelvic_obliquity_mean', 'lateral_trunk_lean_max', 'head_lateral_tilt_max', 'shoulder_asymmetry_index'],
+};
 
-async function loadResearchPortal(body) {
-  const now = Date.now();
-  if (_researchCache && (now - _researchCacheTime) < RESEARCH_CACHE_TTL) {
-    renderResearchPortal(body, _researchCache.popData, _researchCache.coronalData);
-    return;
+const METRIC_LABELS = {
+  pelvic_obliquity_mean: 'Pelvic Obliquity Mean (deg)',
+  pelvic_obliquity_max: 'Pelvic Obliquity Max (deg)',
+  lateral_trunk_lean_max: 'Trunk Lean Max (deg)',
+  knee_valgus_mean: 'Knee Valgus Mean (deg)',
+  knee_valgus_off_max: 'Knee Valgus Off Max (deg)',
+  step_width_mean: 'Step Width Mean',
+  weight_shift_max: 'Weight Shift Max',
+  shoulder_asymmetry_index: 'Shoulder Asymmetry Index',
+  head_lateral_tilt_max: 'Head Lateral Tilt Max (deg)',
+  shoulder_drop_max: 'Shoulder Drop Max (deg)',
+};
+
+const ALL_METRICS = Object.keys(METRIC_LABELS);
+
+let totalSystemPopulation = 0;
+let currentPopulations = [];
+let currentSessions = [];
+let currentSummary = [];
+let metricChart = null;
+let cadenceChart = null;
+
+function $(id) { return document.getElementById(id); }
+
+function getFilters() {
+  return {
+    joint: $('filter-joint').value,
+    sex: $('filter-sex').value,
+    pathology: $('filter-pathology').value,
+    ageMin: $('filter-age-min').value,
+    ageMax: $('filter-age-max').value,
+  };
+}
+
+function buildQuery(extra) {
+  const f = getFilters();
+  const params = new URLSearchParams();
+  if (f.sex && f.sex !== 'all') params.set('gender', f.sex);
+  if (f.ageMin) params.set('age_min', f.ageMin);
+  if (f.ageMax) params.set('age_max', f.ageMax);
+  if (f.pathology) params.set('population', f.pathology);
+  if (extra) {
+    Object.keys(extra).forEach(k => {
+      if (extra[k] != null && extra[k] !== '') params.set(k, extra[k]);
+    });
   }
+  return params.toString();
+}
 
-  body.innerHTML = '<div style="text-align:center; padding:40px;"><p style="color:var(--ink-600);">Loading research data...</p><div style="width:40px; height:40px; border:4px solid #E1EEF8; border-top-color:#1E3C82; border-radius:50%; animation:spin 1s linear infinite; margin:12px auto;"></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style>';
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Request failed: ' + res.status);
+  return res.json();
+}
+
+async function loadDashboard() {
+  const q = buildQuery();
   try {
-    const popRes = await fetch('/api/gait/research/populations');
-    if (!popRes.ok) throw new Error('Failed to load populations');
-    const popData = await popRes.json();
+    // Total system population (unfiltered)
+    if (!totalSystemPopulation) {
+      const allPop = await fetchJson('/api/gait/research/populations');
+      totalSystemPopulation = allPop.total || 0;
+    }
+    const nichePop = await fetchJson('/api/gait/research/populations' + (q ? '?' + q.replace(/population=[^&]*&?/, '') : ''));
+    // Remove population param for population counts (counts by diagnosis should reflect sex/age filters only)
+    const popParams = new URLSearchParams(q);
+    popParams.delete('population');
+    const popQ = popParams.toString();
+    const nichePop2 = await fetchJson('/api/gait/research/populations' + (popQ ? '?' + popQ : ''));
+    currentPopulations = nichePop2.populations || [];
+    const nicheTotal = nichePop2.total || 0;
 
-    const coronalRes = await fetch('/api/gait/research/coronal');
-    if (!coronalRes.ok) throw new Error('Failed to load coronal data');
-    const coronalData = await coronalRes.json();
+    const coronalQ = q;
+    const coronal = await fetchJson('/api/gait/research/coronal' + (coronalQ ? '?' + coronalQ : ''));
+    currentSessions = coronal.sessions || [];
+    currentSummary = coronal.summary || [];
 
-    _researchCache = { popData, coronalData };
-    _researchCacheTime = Date.now();
+    // Counters
+    $('counter-total').textContent = totalSystemPopulation;
+    $('counter-niche').textContent = nicheTotal;
+    const f = getFilters();
+    $('counter-label').textContent = 'Filters: ' + (f.joint || 'knee') + ' joint, ' + (f.sex || 'all') + ', ' + (f.pathology || 'all populations');
 
-    renderResearchPortal(body, popData, coronalData);
+    // KPIs
+    $('kpi-filtered').textContent = currentSessions.length;
+    $('kpi-pops').textContent = currentPopulations.length;
+    const cadences = currentSessions.map(s => s.cadence).filter(v => v != null && Number.isFinite(v));
+    const cadenceMean = cadences.length ? cadences.reduce((a,b)=>a+b,0)/cadences.length : null;
+    $('kpi-cadence').textContent = cadenceMean != null ? cadenceMean.toFixed(2) : '-';
+    const stances = currentSessions.map(s => s.stance_pct).filter(v => v != null && Number.isFinite(v));
+    const stanceMean = stances.length ? stances.reduce((a,b)=>a+b,0)/stances.length : null;
+    $('kpi-stance').textContent = stanceMean != null ? stanceMean.toFixed(1) + '%' : '-';
+
+    populatePathologyDropdown();
+    renderPopulationTable(nicheTotal);
+    renderSessionTable();
+    renderMetricChart();
+    renderSpatiotemporal();
+    renderCadenceChart();
+    renderDeformities();
+    renderCompareSelectors();
+    renderExportDropdown();
+    renderRomTable();
   } catch (e) {
-    body.innerHTML = '<p class="empty-state">Could not load research data. Please sign in and try again.</p>';
+    console.error(e);
   }
 }
 
-function renderResearchPortal(body, popData, coronalData) {
-  const populations = popData.populations || [];
-  const summary = coronalData.summary || [];
-  const totalSessions = coronalData.total || 0;
+function populatePathologyDropdown() {
+  const sel = $('filter-pathology');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All populations</option>';
+  currentPopulations.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.diagnosis || '';
+    opt.textContent = (p.diagnosis || 'Unknown') + ' (n=' + p.session_count + ')';
+    sel.appendChild(opt);
+  });
+  if (current) sel.value = current;
+}
 
-  const joints = ['Knee', 'Hip', 'Ankle', 'Pelvis', 'Shoulder', 'Trunk'];
-  const jointMetrics = {
-    'Knee': ['knee_valgus_mean', 'knee_valgus_off_max'],
-    'Hip': ['pelvic_obliquity_mean', 'pelvic_obliquity_max'],
-    'Ankle': ['step_width_mean', 'weight_shift_max'],
-    'Pelvis': ['pelvic_obliquity_mean', 'pelvic_obliquity_max', 'coronal_load_symmetry'],
-    'Shoulder': ['shoulder_asymmetry_index', 'shoulder_drop_max'],
-    'Trunk': ['lateral_trunk_lean_max', 'head_lateral_tilt_max'],
-  };
+function renderPopulationTable(nicheTotal) {
+  const tbody = $('population-table-body');
+  if (!currentPopulations.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No populations found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentPopulations.map(p => {
+    const s = currentSummary.find(x => x.diagnosis === p.diagnosis) || { metrics: {} };
+    const m = s.metrics || {};
+    const pct = nicheTotal > 0 ? Math.round((p.session_count / nicheTotal) * 100) : 0;
+    return `<tr>
+      <td><strong>${escapeHtml(p.diagnosis || 'Unknown')}</strong></td>
+      <td>${p.session_count}</td>
+      <td>${pct}%</td>
+      <td>${m.pelvic_obliquity_mean && m.pelvic_obliquity_mean.mean != null ? m.pelvic_obliquity_mean.mean : '-'}</td>
+      <td>${m.lateral_trunk_lean_max && m.lateral_trunk_lean_max.mean != null ? m.lateral_trunk_lean_max.mean : '-'}</td>
+      <td>${m.knee_valgus_mean && m.knee_valgus_mean.mean != null ? m.knee_valgus_mean.mean : '-'}</td>
+    </tr>`;
+  }).join('') + `<tr style="font-weight:700;"><td>Total</td><td>${nicheTotal}</td><td>100%</td><td colspan="3"></td></tr>`;
+}
 
-  const metrics = ['pelvic_obliquity_mean', 'lateral_trunk_lean_max', 'knee_valgus_mean',
-    'step_width_mean', 'weight_shift_max', 'shoulder_asymmetry_index'];
+function renderSessionTable() {
+  const tbody = $('session-table-body');
+  if (!currentSessions.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No sessions found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentSessions.map(s => `<tr>
+    <td>${s.session_id}</td>
+    <td>${escapeHtml(s.child_name || '-')}</td>
+    <td>${escapeHtml(s.diagnosis || 'Unknown')}</td>
+    <td>${escapeHtml(s.gender || '-')}</td>
+    <td>${s.age_years != null ? s.age_years : '-'}</td>
+    <td>${s.cadence != null ? Number(s.cadence).toFixed(2) : '-'}</td>
+    <td>${s.stance_pct != null ? Number(s.stance_pct).toFixed(1) + '%' : '-'}</td>
+  </tr>`).join('');
+}
 
-  const metricLabels = {
-    'pelvic_obliquity_mean': 'Pelvic Obliquity (deg)',
-    'lateral_trunk_lean_max': 'Trunk Lean (deg)',
-    'knee_valgus_mean': 'Knee Valgus (deg)',
-    'step_width_mean': 'Step Width',
-    'weight_shift_max': 'Weight Shift',
-    'shoulder_asymmetry_index': 'Shoulder Asymmetry',
-  };
+function renderMetricChart() {
+  const canvas = $('metric-chart');
+  if (!canvas) return;
+  if (metricChart) metricChart.destroy();
+  const joint = getFilters().joint;
+  const metrics = JOINT_METRICS[joint] || ALL_METRICS.slice(0, 4);
+  const labels = currentPopulations.map(p => p.diagnosis || 'Unknown');
+  const datasets = metrics.map((m, idx) => ({
+    label: METRIC_LABELS[m] || m,
+    data: currentPopulations.map(p => {
+      const s = currentSummary.find(x => x.diagnosis === p.diagnosis);
+      const agg = s && s.metrics && s.metrics[m];
+      return agg && agg.mean != null ? agg.mean : null;
+    }),
+    backgroundColor: ['#1E3C82', '#46B4DC', '#2F7A4D', '#C99436', '#B3452F', '#6B4C9A'][idx % 6],
+  }));
+  metricChart = new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: { y: { beginAtZero: true } },
+    }
+  });
+}
 
-  body.innerHTML = `
-    <div class="gait-tabs" id="research-tabs">
-      <button class="gait-tab active" data-tab="overview">Overview</button>
-      <button class="gait-tab" data-tab="populations">Populations</button>
-      <button class="gait-tab" data-tab="compare">Compare Groups</button>
-      <button class="gait-tab" data-tab="export">Export</button>
-    </div>
+function renderSpatiotemporal() {
+  const tbody = $('spatiotemporal-body');
+  if (!currentSessions.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No sessions found.</td></tr>';
+    return;
+  }
+  const byDx = {};
+  currentSessions.forEach(s => {
+    const dx = s.diagnosis || 'Unknown';
+    if (!byDx[dx]) byDx[dx] = [];
+    byDx[dx].push(s);
+  });
+  tbody.innerHTML = Object.entries(byDx).map(([dx, sess]) => {
+    const cad = sess.map(s => s.cadence).filter(v => v != null && Number.isFinite(v));
+    const cyc = sess.map(s => s.cycle_seconds).filter(v => v != null && Number.isFinite(v));
+    const st = sess.map(s => s.stance_pct).filter(v => v != null && Number.isFinite(v));
+    const sw = sess.map(s => s.swing_pct).filter(v => v != null && Number.isFinite(v));
+    const mean = arr => arr.length ? (arr.reduce((a,b)=>a+b,0)/arr.length) : null;
+    return `<tr>
+      <td><strong>${escapeHtml(dx)}</strong></td>
+      <td>${sess.length}</td>
+      <td>${mean(cad) != null ? mean(cad).toFixed(2) : '-'}</td>
+      <td>${mean(cyc) != null ? mean(cyc).toFixed(2) : '-'}</td>
+      <td>${mean(st) != null ? mean(st).toFixed(1) + '%' : '-'}</td>
+      <td>${mean(sw) != null ? mean(sw).toFixed(1) + '%' : '-'}</td>
+    </tr>`;
+  }).join('');
+}
 
-    <div id="research-tab-overview" class="gait-tab-panel" data-default="1">
-      <h4 style="color:#1E3C82; margin-bottom:12px;">Coronal Plane Research Overview</h4>
-      <div class="gait-kpis">
-        <div class="gait-kpi">
-          <p class="gait-kpi-label">Total Sessions</p>
-          <p class="gait-kpi-value">${totalSessions}</p>
-        </div>
-        <div class="gait-kpi">
-          <p class="gait-kpi-label">Populations</p>
-          <p class="gait-kpi-value">${populations.length}</p>
-        </div>
-        <div class="gait-kpi">
-          <p class="gait-kpi-label">Metrics Available</p>
-          <p class="gait-kpi-value">${metrics.length}</p>
-        </div>
-      </div>
-      <div class="mt-16">
-        <h5 style="color:#1E3C82;">Population Breakdown</h5>
-        <table class="admin-table mt-8">
-          <thead><tr><th>Diagnosis</th><th>Sessions</th><th>Pelvic Obliquity (mean)</th><th>Trunk Lean (mean)</th><th>Knee Valgus (mean)</th></tr></thead>
-          <tbody>
-            ${summary.map(s => `
-              <tr>
-                <td><strong>${escapeHtml(s.diagnosis || 'Unknown')}</strong></td>
-                <td>${s.session_count}</td>
-                <td>${s.metrics.pelvic_obliquity_mean ? s.metrics.pelvic_obliquity_mean.mean + ' (n=' + s.metrics.pelvic_obliquity_mean.n + ')' : '-'}</td>
-                <td>${s.metrics.lateral_trunk_lean_max ? s.metrics.lateral_trunk_lean_max.mean + ' (n=' + s.metrics.lateral_trunk_lean_max.n + ')' : '-'}</td>
-                <td>${s.metrics.knee_valgus_mean ? s.metrics.knee_valgus_mean.mean + ' (n=' + s.metrics.knee_valgus_mean.n + ')' : '-'}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
+function renderCadenceChart() {
+  const canvas = $('cadence-chart');
+  if (!canvas) return;
+  if (cadenceChart) cadenceChart.destroy();
+  const byDx = {};
+  currentSessions.forEach(s => {
+    const dx = s.diagnosis || 'Unknown';
+    if (!byDx[dx]) byDx[dx] = [];
+    byDx[dx].push(s);
+  });
+  const labels = Object.keys(byDx);
+  const data = labels.map(dx => {
+    const vals = byDx[dx].map(s => s.cadence).filter(v => v != null && Number.isFinite(v));
+    return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+  });
+  cadenceChart = new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Mean Cadence (cycles/s)', data, backgroundColor: '#46B4DC' }] },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+  });
+}
 
-    <div id="research-tab-populations" class="gait-tab-panel">
-      <h4 style="color:#1E3C82; margin-bottom:12px;">Population Counts</h4>
-      <table class="admin-table">
-        <thead><tr><th>Diagnosis</th><th>Sessions</th><th>Percentage</th></tr></thead>
-        <tbody>
-          ${populations.map(p => `
-            <tr>
-              <td><strong>${escapeHtml(p.diagnosis || 'Unknown')}</strong></td>
-              <td>${p.session_count}</td>
-              <td>${totalSessions > 0 ? Math.round((p.session_count / totalSessions) * 100) : 0}%</td>
-            </tr>
-          `).join('')}
-          <tr style="font-weight:700;">
-            <td>Total</td>
-            <td>${totalSessions}</td>
-            <td>100%</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+function renderDeformities() {
+  const container = $('deformity-heatmap');
+  if (!currentSessions.length) {
+    container.innerHTML = '<p class="empty-state">No sessions found.</p>';
+    return;
+  }
+  const byDx = {};
+  currentSessions.forEach(s => {
+    const dx = s.diagnosis || 'Unknown';
+    if (!byDx[dx]) byDx[dx] = { frontal: 0, sagittal: 0, rotational: 0, total: 0 };
+    const d = s.deformities || {};
+    ['frontal', 'sagittal', 'rotational'].forEach(plane => {
+      const arr = Array.isArray(d[plane]) ? d[plane] : [];
+      byDx[dx][plane] += arr.length;
+      byDx[dx].total += arr.length;
+    });
+  });
+  const maxTotal = Math.max(1, ...Object.values(byDx).map(v => v.total));
+  let html = '<div class="rp-heat-row"><div class="rp-heat-head">Population</div><div class="rp-heat-head">Frontal</div><div class="rp-heat-head">Sagittal</div><div class="rp-heat-head">Rotational</div></div>';
+  Object.entries(byDx).forEach(([dx, v]) => {
+    const intensity = v.total / maxTotal;
+    html += '<div class="rp-heat-row">';
+    html += `<div><strong>${escapeHtml(dx)}</strong> (n=${v.total})</div>`;
+    ['frontal', 'sagittal', 'rotational'].forEach(plane => {
+      const count = v[plane];
+      const alpha = Math.min(0.85, 0.15 + (count / Math.max(1, maxTotal)) * 0.7);
+      const bg = count > 0 ? `rgba(179,69,47,${alpha})` : 'rgba(232,244,253,0.6)';
+      const color = count > 0 ? '#fff' : '#1E3C82';
+      html += `<div class="rp-heat-cell" style="background:${bg}; color:${color};">${count}</div>`;
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
 
-    <div id="research-tab-compare" class="gait-tab-panel">
-      <h4 style="color:#1E3C82; margin-bottom:12px;">Compare Groups</h4>
-      <div class="grid grid-2" style="gap:12px;">
-        <div class="field">
-          <label>Group 1</label>
-          <select id="research-pop1" class="status-select">
-            ${populations.map(p => `<option value="${escapeHtml(p.diagnosis || '')}">${escapeHtml(p.diagnosis || 'Unknown')} (n=${p.session_count})</option>`).join('')}
-          </select>
-        </div>
-        <div class="field">
-          <label>Group 2</label>
-          <select id="research-pop2" class="status-select">
-            ${populations.map(p => `<option value="${escapeHtml(p.diagnosis || '')}">${escapeHtml(p.diagnosis || 'Unknown')} (n=${p.session_count})</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div class="field mt-12">
-        <label>Metric</label>
-        <select id="research-metric" class="status-select">
-          ${metrics.map(m => `<option value="${m}">${metricLabels[m]}</option>`).join('')}
-        </select>
-      </div>
-      <button class="btn btn-primary mt-12" id="research-compare-btn">Compare</button>
-      <div id="research-compare-results" class="mt-16"></div>
-    </div>
+function renderCompareSelectors() {
+  const pop1 = $('research-pop1');
+  const pop2 = $('research-pop2');
+  const metric = $('research-metric');
+  const exportPop = $('research-export-pop');
+  const opts = currentPopulations.map(p => `<option value="${escapeHtml(p.diagnosis || '')}">${escapeHtml(p.diagnosis || 'Unknown')} (n=${p.session_count})</option>`).join('');
+  if (pop1) { pop1.innerHTML = opts; if (pop1.options.length > 1) pop1.selectedIndex = 1; }
+  if (pop2) { pop2.innerHTML = opts; }
+  if (metric) {
+    metric.innerHTML = ALL_METRICS.map(m => `<option value="${m}">${METRIC_LABELS[m]}</option>`).join('');
+  }
+  if (exportPop) {
+    exportPop.innerHTML = '<option value="">All populations</option>' + opts;
+  }
+}
 
-    <div id="research-tab-export" class="gait-tab-panel">
-      <h4 style="color:#1E3C82; margin-bottom:12px;">Export Research Data</h4>
-      <p style="color:var(--ink-600); font-size:.9rem;">Export coronal plane metrics to CSV for statistical analysis in Excel, SPSS, or R.</p>
-      <div class="field mt-12">
-        <label>Filter by population (optional)</label>
-        <select id="research-export-pop" class="status-select">
-          <option value="">All populations</option>
-          ${populations.map(p => `<option value="${escapeHtml(p.diagnosis || '')}">${escapeHtml(p.diagnosis || 'Unknown')} (n=${p.session_count})</option>`).join('')}
-        </select>
-      </div>
-      <button class="btn btn-primary mt-12" id="research-export-btn">Download CSV</button>
-    </div>
-  `;
+function renderRomTable() {
+  const tbody = $('rom-table-body');
+  let romRows = [];
+  for (const s of currentSessions) {
+    // ROM not included in coronal payload; skip (would need session detail endpoint)
+  }
+  tbody.innerHTML = '<tr><td colspan="5" class="empty-state">ROM observations are available in individual gait reports.</td></tr>';
+}
 
-  body.querySelectorAll('.gait-tab').forEach(tab => {
+function renderExportDropdown() {
+  // already handled in renderCompareSelectors
+}
+
+// Tab switching
+function setupTabs() {
+  const body = document.querySelector('.dash-body');
+  document.querySelectorAll('.gait-tab').forEach(tab => {
     tab.addEventListener('click', () => {
-      body.querySelectorAll('.gait-tab').forEach(t => t.classList.remove('active'));
-      body.querySelectorAll('.gait-tab-panel').forEach(p => p.style.display = 'none');
+      document.querySelectorAll('.gait-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.gait-tab-panel').forEach(p => p.style.display = 'none');
       tab.classList.add('active');
-      const panel = body.querySelector('#research-tab-' + tab.dataset.tab);
+      const panel = document.querySelector('#research-tab-' + tab.dataset.tab);
       if (panel) panel.style.display = 'block';
     });
   });
-  body.querySelectorAll('.gait-tab-panel').forEach((p, i) => {
+  document.querySelectorAll('.gait-tab-panel').forEach((p, i) => {
     p.style.display = i === 0 ? 'block' : 'none';
   });
+}
 
-  const compareBtn = body.querySelector('#research-compare-btn');
-  if (compareBtn) {
-    compareBtn.addEventListener('click', async () => {
-      const pop1 = body.querySelector('#research-pop1').value;
-      const pop2 = body.querySelector('#research-pop2').value;
-      const metric = body.querySelector('#research-metric').value;
-      const resultsEl = body.querySelector('#research-compare-results');
-      resultsEl.innerHTML = '<p class="empty-state">Comparing...</p>';
-      try {
-        const res = await fetch(`/api/gait/research/compare?pop1=${encodeURIComponent(pop1)}&pop2=${encodeURIComponent(pop2)}&metric=${encodeURIComponent(metric)}`);
-        if (!res.ok) throw new Error('Comparison failed');
-        const data = await res.json();
-        const r1 = data.pop1, r2 = data.pop2;
-        resultsEl.innerHTML = `
-          <table class="admin-table">
-            <thead><tr><th>Group</th><th>N</th><th>Mean</th><th>SD</th><th>Cohen's d</th><th>Effect Size</th></tr></thead>
-            <tbody>
-              <tr><td><strong>${escapeHtml(r1.diagnosis)}</strong></td><td>${r1.n}</td><td>${r1.mean != null ? r1.mean : '-'}</td><td>${r1.sd != null ? r1.sd : '-'}</td><td rowspan="2">${data.cohens_d != null ? data.cohens_d : '-'}</td><td rowspan="2">${data.effect_size || '-'}</td></tr>
-              <tr><td><strong>${escapeHtml(r2.diagnosis)}</strong></td><td>${r2.n}</td><td>${r2.mean != null ? r2.mean : '-'}</td><td>${r2.sd != null ? r2.sd : '-'}</td></tr>
-            </tbody>
-          </table>
-          ${r1.n < 5 || r2.n < 5 ? '<p style="color:#B3452F; font-size:.8rem; margin-top:8px;">Warning: small sample size (n &lt; 5) - results may not be reliable.</p>' : ''}
-        `;
-      } catch (e) {
-        resultsEl.innerHTML = '<p class="empty-state">Comparison failed. Check that both populations have analyzed sessions.</p>';
-      }
-    });
-  }
+function setupCompare() {
+  const btn = $('research-compare-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const pop1 = $('research-pop1').value;
+    const pop2 = $('research-pop2').value;
+    const metric = $('research-metric').value;
+    const resultsEl = $('research-compare-results');
+    resultsEl.innerHTML = '<p class="empty-state">Comparing...</p>';
+    try {
+      const q = buildQuery({ pop1, pop2, metric });
+      const res = await fetch('/api/gait/research/compare?' + q);
+      if (!res.ok) throw new Error('Comparison failed');
+      const data = await res.json();
+      const r1 = data.pop1, r2 = data.pop2;
+      resultsEl.innerHTML = `
+        <table class="admin-table">
+          <thead><tr><th>Group</th><th>N</th><th>Mean</th><th>SD</th><th>Cohen's d</th><th>Effect Size</th></tr></thead>
+          <tbody>
+            <tr><td><strong>${escapeHtml(r1.diagnosis)}</strong></td><td>${r1.n}</td><td>${r1.mean != null ? r1.mean : '-'}</td><td>${r1.sd != null ? r1.sd : '-'}</td><td rowspan="2">${data.cohens_d != null ? data.cohens_d : '-'}</td><td rowspan="2">${data.effect_size || '-'}</td></tr>
+            <tr><td><strong>${escapeHtml(r2.diagnosis)}</strong></td><td>${r2.n}</td><td>${r2.mean != null ? r2.mean : '-'}</td><td>${r2.sd != null ? r2.sd : '-'}</td></tr>
+          </tbody>
+        </table>
+        ${r1.n < 5 || r2.n < 5 ? '<p style="color:#B3452F; font-size:.8rem; margin-top:8px;">Warning: small sample size (n &lt; 5) - results may not be reliable.</p>' : ''}
+      `;
+    } catch (e) {
+      resultsEl.innerHTML = '<p class="empty-state">Comparison failed. Check that both populations have analyzed sessions.</p>';
+    }
+  });
+}
 
-  const exportBtn = body.querySelector('#research-export-btn');
-  if (exportBtn) {
-    exportBtn.addEventListener('click', () => {
-      const pop = body.querySelector('#research-export-pop').value;
-      window.open(`/api/gait/research/export?population=${encodeURIComponent(pop)}`, '_blank');
-    });
-  }
+function setupExport() {
+  const btn = $('research-export-btn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const pop = $('research-export-pop').value;
+    const q = buildQuery({ population: pop });
+    // buildQuery includes population from filter; override with selected export pop
+    const params = new URLSearchParams(q);
+    if (pop) params.set('population', pop); else params.delete('population');
+    window.open('/api/gait/research/export?' + params.toString(), '_blank');
+  });
+}
+
+function setupFilters() {
+  $('apply-filters-btn').addEventListener('click', loadDashboard);
+  $('reset-filters-btn').addEventListener('click', () => {
+    $('filter-joint').value = 'knee';
+    $('filter-sex').value = 'all';
+    $('filter-pathology').value = '';
+    $('filter-age-min').value = '';
+    $('filter-age-max').value = '';
+    loadDashboard();
+  });
+  $('filter-joint').addEventListener('change', () => {
+    renderMetricChart();
+  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const body = document.getElementById('research-portal-body');
-  if (body) loadResearchPortal(body);
+  setupTabs();
+  setupFilters();
+  setupCompare();
+  setupExport();
+  loadDashboard();
 });
