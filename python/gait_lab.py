@@ -2055,6 +2055,37 @@ def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs,
         if swm and swm > 0.35:
             detected.append(("deformity", f"Wide step width (~{swm:.0f}% of cycle) — circumduction arc for foot clearance",
                              "circumduction", "moderate"))
+        # Scissoring: feet crossing midline (negative step width) indicates adductor spasticity.
+        if swm is not None and swm < -0.15:
+            detected.append(("deformity", f"Negative step width (~{swm:.0f}%) — scissoring (adductor spasticity, legs crossing midline)",
+                             "scissoring", "moderate"))
+        # Waddling: bilateral pelvic obliquity with wide base indicates bilateral hip abductor weakness.
+        if pel > 4.0 and swm and swm > 0.25:
+            detected.append(("deformity", f"Bilateral pelvic drop (~{pel:.0f}°) with wide base — waddling (bilateral hip abductor weakness)",
+                             "waddling", "moderate"))
+        # Steppage: hip hiking with frontal knee compensation indicates foot drop.
+        if pel > 6.0 and kv < 0.05:
+            detected.append(("deformity", f"Pelvic obliquity ~{pel:.0f}° with minimal knee deviation — steppage (foot drop compensation)",
+                             "steppage", "moderate"))
+        # Antalgic: asymmetric weight shift with coronal load asymmetry indicates pain avoidance.
+        cl = fm.get("coronal_load", {}) or {}
+        symmetry = cl.get("symmetry_pct", 100)
+        if wshift > 0.3 and symmetry < 40:
+            detected.append(("deformity", f"Asymmetric weight distribution (offset ~{wshift:.2f}, symmetry {symmetry:.0f}%) — antalgic (pain avoidance)",
+                             "antalgic", "moderate"))
+        # Ataxic: high step width variability indicates balance disorder.
+        sw_cv = fm.get("step_width_cv", 0)
+        if swm and swm > 0.3 and sw_cv and sw_cv > 0.4:
+            detected.append(("deformity", f"Wide variable step width (mean ~{swm:.0f}%, CV {sw_cv:.2f}) — ataxic (balance disorder)",
+                             "ataxic", "moderate"))
+        # Rearfoot alignment: calcaneal eversion/inversion proxy from ankle-foot angle.
+        afa = fm.get("ankle_foot_align", {}) or {}
+        for side in ("L", "R"):
+            val = afa.get(side)
+            if val is not None and abs(val) > 10.0:
+                direction = "eversion (pronation)" if val > 0 else "inversion (supination)"
+                detected.append(("deformity", f"{side} rearfoot {direction} (~{val:.0f}°) — subtalar malalignment",
+                                 "rearfoot", "mild"))
 
     # Map detected kinds to archetype muscle maps + prescriptions
     kinds = set()
@@ -2107,6 +2138,11 @@ def derive_clinical(cv_sagittal, cv_frontal, session_id, patient, artifacts_abs,
         elif kind == "shoulder":
             frontal_defs.append({"name": "Shoulder height asymmetry (upper-limb compensation)", "magnitude": sev, "category": "functional",
                                  "plane": "frontal", "detected": True, "description": desc})
+        elif kind in ("vaulting", "hip_hiking", "circumduction", "scissoring", "waddling", "steppage", "antalgic", "ataxic", "rearfoot"):
+            frontal_defs.append({"name": kind.replace("_", " ").title() + " pattern", "magnitude": sev,
+                                 "category": "functional",
+                                 "plane": "frontal", "detected": True, "description": desc})
+
         elif kind in ("equinus",):
             sagittal_defs.append({"name": "Drop foot / reduced dorsiflexion", "magnitude": sev, "category": "functional",
                                   "plane": "sagittal", "detected": True, "description": desc})
