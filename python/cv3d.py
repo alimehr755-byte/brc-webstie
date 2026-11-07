@@ -197,16 +197,18 @@ def _try_pose2sim(sagittal_video, frontal_video, artifacts, session_id):
     lightweight triangulator can take over.
     """
     try:
-        import pose2sim  # noqa: F401
+        import Pose2Sim as pose2sim  # noqa: F401
     except Exception:
-        return None
+        try:
+            import pose2sim  # noqa: F401
+        except Exception:
+            return None
     try:
         # Pose2Sim works from precomputed 2D keypoint *files* + a calibration
         # config. Real calibration tables are clinic-specific, so we initialize
         # the workspace, export the extracted keypoints, and write the config;
         # the heavyweight numerical solve is delegated to Pose2Sim's
         # triangulation package when models are present.
-        from pose2sim import btk  # noqa: F401
         project_dir = os.path.join(artifacts, "pose2sim")
         os.makedirs(os.path.join(project_dir, "2d_keypoints"), exist_ok=True)
         os.makedirs(os.path.join(project_dir, "3d_keypoints"), exist_ok=True)
