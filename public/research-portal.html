@@ -245,6 +245,7 @@
         <button class="gait-tab active" data-tab="overview">Overview</button>
         <button class="gait-tab" data-tab="multiplane">Multi-Plane Waveforms</button>
         <button class="gait-tab" data-tab="spatiotemporal">Spatiotemporal</button>
+        <button class="gait-tab" data-tab="longitudinal">Longitudinal</button>
         <button class="gait-tab" data-tab="deformities">Deformity Heatmap</button>
         <button class="gait-tab" data-tab="compare">Compare Groups</button>
         <button class="gait-tab" data-tab="export">Export</button>
@@ -270,7 +271,7 @@
           <h4>Filtered Session Registry</h4>
           <div class="rp-table-wrap">
             <table class="admin-table">
-              <thead><tr><th>ID</th><th>Patient</th><th>Diagnosis</th><th>GMFCS</th><th>Sex</th><th>Age</th><th>Cadence</th></tr></thead>
+              <thead><tr><th>ID</th><th>Patient</th><th>Diagnosis</th><th>GMFCS</th><th>Sex</th><th>Age</th><th>Cadence</th><th>Video</th></tr></thead>
               <tbody id="session-table-body"><tr><td colspan="7" class="empty-state">Loading...</td></tr></tbody>
             </table>
           </div>
@@ -316,6 +317,28 @@
         <div class="rp-section">
           <h4>Cadence Comparison</h4>
           <div class="rp-chart-box"><canvas id="cadence-chart"></canvas></div>
+        </div>
+      </div>
+
+      <div id="research-tab-longitudinal" class="gait-tab-panel">
+        <div class="rp-section">
+          <h4>Per-Patient Longitudinal Trends</h4>
+          <div class="field" style="display:inline-block; margin-right:16px;">
+            <label>Metric</label>
+            <select id="longitudinal-metric" class="status-select">
+              <option value="cadence">Cadence (cycles/s)</option>
+              <option value="stance_pct">Stance %</option>
+              <option value="swing_pct">Swing %</option>
+              <option value="pelvic_obliquity_mean">Pelvic Obliquity (deg)</option>
+              <option value="knee_valgus_mean">Knee Valgus (deg)</option>
+              <option value="step_width_mean">Step Width</option>
+            </select>
+          </div>
+          <div class="rp-actions" style="margin-top:8px;">
+            <button class="btn btn-primary" id="longitudinal-refresh-btn" type="button">Refresh</button>
+          </div>
+          <div class="rp-chart-box"><canvas id="longitudinal-chart"></canvas></div>
+          <p class="rp-note">One line per patient across their analyzed sessions, ordered by session date.</p>
         </div>
       </div>
 

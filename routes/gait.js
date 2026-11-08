@@ -2514,6 +2514,10 @@ router.get('/research/coronal', requireAuth, (req, res) => {
       age_years: r.age_years,
       gender: r.gender,
       created_at: r.created_at,
+      frontal_video: r.frontal_video || null,
+      sagittal_video: r.sagittal_video || null,
+      combined_video: r.combined_video || null,
+      third_video: r.third_video || null,
       pelvic_obliquity_mean: metrics.pelvic_obliquity_mean,
       pelvic_obliquity_max: metrics.pelvic_obliquity_max,
       lateral_trunk_lean_max: metrics.lateral_trunk_lean_max,
@@ -2591,7 +2595,7 @@ router.get('/research/waveforms', requireAuth, (req, res) => {
   if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
 
   const rows = db.prepare(`
-    SELECT s.id, COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, s.results
+    SELECT s.id, s.user_id, s.created_at, COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, u.child_name, s.age_years, s.gender, s.gmfcs_level, s.frontal_video, s.sagittal_video, s.combined_video, s.third_video, s.results
     FROM gait_sessions s
     JOIN users u ON u.id = s.user_id
     ${where}
@@ -2656,6 +2660,34 @@ router.get('/research/waveforms', requireAuth, (req, res) => {
   res.json({ joint, plane, side, samples: maxLen, phases, populations: result });
 });
 
+// GET /research/normative — age/sex-stratified normative joint-angle bands
+router.get('/research/normative', requireAuth, (req, res) => {
+  const joint = req.query.joint || null;
+  const plane = req.query.plane || null;
+  const side = req.query.side || null;
+  const age = req.query.age ? Number(req.query.age) : null;
+  const sex = req.query.sex || 'all';
+
+  let where = "WHERE 1=1";
+  const params = [];
+  if (joint) { where += " AND joint = ?"; params.push(joint); }
+  if (plane) { where += " AND plane = ?"; params.push(plane); }
+  if (side) { where += " AND side = ?"; params.push(side); }
+  if (age != null && Number.isFinite(age)) {
+    where += " AND age_min <= ? AND age_max >= ?"; params.push(age, age);
+  }
+  if (sex && sex !== 'all') { where += " AND (sex = ? OR sex = 'all')"; params.push(sex); }
+
+  const rows = db.prepare(`
+    SELECT joint, plane, side, age_min, age_max, sex, metric, p5, p50, p95, source
+    FROM research_normative_bands
+    ${where}
+    ORDER BY joint, plane, side, metric
+  `).all(...params);
+
+  res.json({ bands: rows });
+});
+
 router.get('/research/compare', requireAuth, (req, res) => {
   const pop1 = req.query.pop1 || null;
   const pop2 = req.query.pop2 || null;
@@ -2696,6 +2728,43 @@ router.get('/research/compare', requireAuth, (req, res) => {
   const sd1 = vals1.length ? Math.sqrt(vals1.reduce((a, b) => a + (b - mean1) ** 2, 0) / vals1.length) : null;
   const sd2 = vals2.length ? Math.sqrt(vals2.reduce((a, b) => a + (b - mean2) ** 2, 0) / vals2.length) : null;
 
+// Statistics helpers
+  const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const sampleSD = (arr, m) => Math.sqrt(arr.reduce((a, b) => a + (b - m) ** 2, 0) / (arr.length - 1));
+  const studentTCritical = (df) => {
+    // Approximate two-tailed 95% critical t via Wilson-Hilferman / normal fallback
+    if (df <= 0) return null;
+    if (df >= 120) return 1.96;
+    const table = { 1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228, 15: 2.131, 20: 2.086, 30: 2.042, 40: 2.021, 60: 2.000 };
+    if (table[df] != null) return table[df];
+    // Interpolate between nearest table entries
+    const keys = Object.keys(table).map(Number).sort((a, b) => a - b);
+    let lo = keys[0], hi = keys[keys.length - 1];
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (df >= keys[i] && df <= keys[i + 1]) { lo = keys[i]; hi = keys[i + 1]; break; }
+    }
+    return table[lo] + (table[hi] - table[lo]) * (df - lo) / (hi - lo);
+  };
+  const welchTTest = (a, b) => {
+    const na = a.length, nb = b.length;
+    if (na < 2 || nb < 2) return { t: null, df: null, p: null, ci: null };
+    const ma = mean(a), mb = mean(b);
+    const va = sampleSD(a, ma) ** 2, vb = sampleSD(b, mb) ** 2;
+    const se = Math.sqrt(va / na + vb / nb);
+    if (se === 0) return { t: 0, df: null, p: null, ci: [0, 0] };
+    const t = (ma - mb) / se;
+    const num = (va / na + vb / nb) ** 2;
+    const den = (va / na) ** 2 / (na - 1) + (vb / nb) ** 2 / (nb - 1);
+    const df = den === 0 ? na + nb - 2 : num / den;
+    const crit = studentTCritical(df);
+    // Two-tailed p via normal approximation with df correction (conservative for small n)
+    const z = Math.abs(t);
+    const p = 2 * (1 - 0.5 * (1 + Math.erf(z / Math.sqrt(2))));
+    const ciHalf = crit != null ? crit * se : null;
+    const ci = ciHalf != null ? [Math.round((ma - mb - ciHalf) * 100) / 100, Math.round((ma - mb + ciHalf) * 100) / 100] : null;
+    return { t: Math.round(t * 100) / 100, df: Math.round(df * 100) / 100, p: Math.round(p * 10000) / 10000, ci };
+  };
+
   // Cohen's d effect size
   let cohensD = null;
   if (vals1.length >= 2 && vals2.length >= 2) {
@@ -2705,12 +2774,19 @@ router.get('/research/compare', requireAuth, (req, res) => {
     }
   }
 
+  const stats = welchTTest(vals1, vals2);
+
   res.json({
     metric,
     pop1: { diagnosis: pop1, n: vals1.length, mean: mean1 ? Math.round(mean1 * 100) / 100 : null, sd: sd1 ? Math.round(sd1 * 100) / 100 : null, values: vals1 },
     pop2: { diagnosis: pop2, n: vals2.length, mean: mean2 ? Math.round(mean2 * 100) / 100 : null, sd: sd2 ? Math.round(sd2 * 100) / 100 : null, values: vals2 },
     cohens_d: cohensD,
     effect_size: cohensD != null ? (Math.abs(cohensD) < 0.2 ? 'negligible' : (Math.abs(cohensD) < 0.5 ? 'small' : (Math.abs(cohensD) < 0.8 ? 'medium' : 'large'))) : null,
+    welch_t: stats.t,
+    welch_df: stats.df,
+    welch_p: stats.p,
+    mean_diff_ci95: stats.ci,
+    significant: stats.p != null && stats.p < 0.05,
   });
 });
 
@@ -2929,6 +3005,55 @@ router.get('/research/export.pdf', requireAuth, async (req, res) => {
   });
 
   doc.end();
+});
+
+// GET /research/progression — per-patient time series of key gait metrics
+router.get('/research/progression', requireAuth, (req, res) => {
+  const diagnosis = req.query.diagnosis || null;
+  const gender = req.query.gender || null;
+  const gmfcsLevel = req.query.gmfcs_level || null;
+  const ageMin = req.query.age_min ? Number(req.query.age_min) : null;
+  const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
+  const metric = req.query.metric || 'cadence';
+
+  let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL";
+  const params = [];
+  if (diagnosis) { where += " AND COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) = ?"; params.push(diagnosis); }
+  if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
+  if (gmfcsLevel && gmfcsLevel !== 'unspecified') { where += " AND s.gmfcs_level = ?"; params.push(gmfcsLevel); }
+  if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
+  if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
+
+  const rows = db.prepare(`
+    SELECT s.id, u.child_name, s.diagnosis, s.gmfcs_level, s.age_years, s.gender, s.created_at, s.results
+    FROM gait_sessions s
+    JOIN users u ON u.id = s.user_id
+    ${where}
+    ORDER BY u.child_name, s.created_at ASC
+  `).all(...params);
+
+  const byPatient = {};
+  rows.forEach(r => {
+    const j = safeJson(r.results) || {};
+    const cv = j.cv && j.cv.frontal && j.cv.frontal.metrics || {};
+    const cycle = j.cycle || {};
+    const patient = r.child_name || 'Unknown';
+    if (!byPatient[patient]) byPatient[patient] = { patient, diagnosis: r.diagnosis || 'Unknown', gmfcs_level: r.gmfcs_level, sessions: [] };
+    const m = {
+      session_id: r.id,
+      created_at: r.created_at,
+      age_years: r.age_years,
+      cadence: cycle.cadence_cycles_per_second != null ? cycle.cadence_cycles_per_second : null,
+      stance_pct: cycle.stance_pct != null ? cycle.stance_pct : null,
+      swing_pct: cycle.swing_pct != null ? cycle.swing_pct : null,
+      pelvic_obliquity_mean: cv.pelvic_obliquity_mean != null ? cv.pelvic_obliquity_mean : null,
+      knee_valgus_mean: cv.knee_valgus_mean != null ? cv.knee_valgus_mean : null,
+      step_width_mean: cv.step_width_mean != null ? cv.step_width_mean : null,
+    };
+    byPatient[patient].sessions.push(m);
+  });
+
+  res.json({ metric, patients: Object.values(byPatient) });
 });
 
 module.exports = router;

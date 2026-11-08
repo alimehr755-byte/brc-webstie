@@ -52,17 +52,49 @@ function normativeBand(joint, plane, side) {
   return p[side] || (side === 'B' ? p.L : null);
 }
 
-const ALL_METRICS = ALL_METRICSS;
+const ALL_METRICS = Object.keys(METRIC_LABELS);
 const GMFCS_LEVELS = ['I','II','III','IV','V'];
+
+let currentNormative = [];
+
+const NORMATIVE_METRIC_MAP = {
+  knee: { sagittal: 'knee_flex', frontal: 'knee_valgus', transverse: null },
+  hip: { sagittal: 'hip_flex', frontal: 'hip_ab_abd', transverse: null },
+  ankle: { sagittal: 'ankle_angle', frontal: null, transverse: null },
+  pelvis: { sagittal: 'pelvic_obliquity_mean', frontal: 'pelvic_obliquity_mean', transverse: null },
+  spine: { sagittal: 'lateral_trunk_lean_max', frontal: 'lateral_trunk_lean_max', transverse: null },
+};
+
+async function fetchNormativeBands() {
+  const f = getFilters();
+  const params = new URLSearchParams({ joint: f.joint, plane: f.plane, side: f.side, sex: f.sex });
+  if (f.ageMin) params.set('age', f.ageMin);
+  try {
+    const data = await fetchJson('/api/gait/research/normative?' + params.toString());
+    currentNormative = data.bands || [];
+  } catch (e) {
+    currentNormative = [];
+  }
+}
+
+function dbNormativeBand(joint, plane, side) {
+  const metric = NORMATIVE_METRIC_MAP[joint] && NORMATIVE_METRIC_MAP[joint][plane];
+  if (!metric) return null;
+  const row = currentNormative.find(b => b.joint === joint && b.plane === plane && b.side === side && b.metric === metric);
+  if (!row || row.p5 == null || row.p95 == null) return null;
+  return [row.p5, row.p95];
+}
 
 let totalSystemPopulation = 0;
 let currentPopulations = [];
 let currentSessions = [];
 let currentSummary = [];
 let currentWaveform = { joint: 'knee', plane: 'sagittal', side: 'L', populations: [], samples: 120, phases: [] };
+let currentLongitudinal = { patients: [], metric: 'cadence' };
 let metricChart = null;
 let cadenceChart = null;
 let waveformChart = null;
+let longitudinalChart = null;
 
 function $(id) { return document.getElementById(id); }
 
@@ -118,6 +150,7 @@ async function loadDashboard() {
       const allPop = await fetchJson('/api/gait/research/populations');
       totalSystemPopulation = allPop.total || 0;
     }
+    await fetchNormativeBands();
     const popQ = new URLSearchParams(dq);
     popQ.delete('population');
     const nichePop = await fetchJson('/api/gait/research/populations' + (popQ.toString() ? '?' + popQ.toString() : ''));
@@ -156,6 +189,7 @@ async function loadDashboard() {
     renderMultiplane();
     renderSpatiotemporal();
     renderCadenceChart();
+    await loadProgression();
     renderDeformities();
     renderCompareSelectors();
     renderExportDropdown();
@@ -226,6 +260,7 @@ function renderSessionTable() {
     <td>${escapeHtml(s.gender || '-')}</td>
     <td>${s.age_years != null ? s.age_years : '-'}</td>
     <td>${s.cadence != null ? Number(s.cadence).toFixed(2) : '-'}</td>
+    <td>${s.frontal_video || s.sagittal_video || s.combined_video || s.third_video ? `<a class="btn btn-ghost btn-sm" href="/api/gait/sessions/${s.session_id}/video/frontal" target="_blank" rel="noopener">Frontal</a> ${s.sagittal_video ? `<a class="btn btn-ghost btn-sm" href="/api/gait/sessions/${s.session_id}/video/sagittal" target="_blank" rel="noopener">Sagittal</a>` : ''}${s.combined_video ? `<a class="btn btn-ghost btn-sm" href="/api/gait/sessions/${s.session_id}/video/combined" target="_blank" rel="noopener">Combined</a>` : ''}${s.third_video ? `<a class="btn btn-ghost btn-sm" href="/api/gait/sessions/${s.session_id}/video/third" target="_blank" rel="noopener">Third</a>` : ''}` : '—'}</td>
   </tr>`).join('');
 }
 
@@ -279,7 +314,7 @@ function renderWaveformChart() {
   const labels = Array.from({ length: w.samples || 120 }, (_, i) => Math.round((i / Math.max(1, (w.samples || 120) - 1)) * 100));
   const colors = ['#1E3C82', '#46B4DC', '#2F7A4D', '#C99436', '#B3452F', '#6B4C9A', '#8E44AD', '#16A085'];
   const datasets = [];
-  const band = showNorm ? normativeBand(w.joint, w.plane, w.side) : null;
+  const band = showNorm ? dbNormativeBand(w.joint, w.plane, w.side) : null;
   if (band) {
     datasets.push({
       label: '',
@@ -451,6 +486,70 @@ function renderCadenceChart() {
   });
 }
 
+async function loadProgression() {
+  const f = getFilters();
+  const params = new URLSearchParams();
+  if (f.pathology) params.set('diagnosis', f.pathology);
+  if (f.sex && f.sex !== 'all') params.set('gender', f.sex);
+  if (f.gmfcs) params.set('gmfcs_level', f.gmfcs);
+  if (f.ageMin) params.set('age_min', f.ageMin);
+  if (f.ageMax) params.set('age_max', f.ageMax);
+  params.set('metric', $('longitudinal-metric') ? $('longitudinal-metric').value : 'cadence');
+  try {
+    currentLongitudinal = await fetchJson('/api/gait/research/progression?' + params.toString()) || { patients: [] };
+  } catch (e) {
+    currentLongitudinal = { patients: [] };
+  }
+  renderLongitudinalChart();
+}
+
+function renderLongitudinalChart() {
+  const canvas = $('longitudinal-chart');
+  if (!canvas) return;
+  if (longitudinalChart) longitudinalChart.destroy();
+  const patients = (currentLongitudinal && currentLongitudinal.patients) || [];
+  const metric = $('longitudinal-metric') ? $('longitudinal-metric').value : 'cadence';
+  if (!patients.length) {
+    canvas.style.display = 'none';
+    return;
+  }
+  canvas.style.display = 'block';
+  const colors = ['#1E3C82', '#46B4DC', '#2F7A4D', '#C99436', '#B3452F', '#6B4C9A', '#8E44AD', '#16A085'];
+  const datasets = patients.slice(0, 8).map((p, idx) => {
+    const sessions = (p.sessions || []).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+    const labels = sessions.map(s => s.created_at ? s.created_at.slice(0, 10) : '');
+    const data = sessions.map(s => s[metric]);
+    return {
+      label: `${escapeHtml(p.patient)} ${p.diagnosis ? '(' + escapeHtml(p.diagnosis) + ')' : ''}`,
+      data,
+      borderColor: colors[idx % colors.length],
+      backgroundColor: colors[idx % colors.length] + '22',
+      fill: false,
+      tension: 0.2,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      borderWidth: 2,
+    };
+  });
+  // Shared x-axis = sorted unique session dates across patients
+  const allDates = new Set();
+  patients.forEach(p => (p.sessions || []).forEach(s => { if (s.created_at) allDates.add(s.created_at.slice(0, 10)); }));
+  const xLabels = Array.from(allDates).sort();
+  longitudinalChart = new Chart(canvas, {
+    type: 'line',
+    data: { labels: xLabels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: {
+        x: { title: { display: true, text: 'Session date' } },
+        y: { title: { display: true, text: metric }, beginAtZero: false },
+      }
+    }
+  });
+}
+
 function renderDeformities() {
   const container = $('deformity-heatmap');
   if (!currentSessions.length) {
@@ -555,13 +654,30 @@ function setupCompare() {
       const r1 = data.pop1, r2 = data.pop2;
       resultsEl.innerHTML = `
         <table class="admin-table">
-          <thead><tr><th>Group</th><th>N</th><th>Mean</th><th>SD</th><th>Cohen's d</th><th>Effect Size</th></tr></thead>
+          <thead><tr><th>Group</th><th>N</th><th>Mean</th><th>SD</th><th>Welch t</th><th>df</th><th>p-value</th><th>95% CI</th><th>Signif.</th></tr></thead>
           <tbody>
-            <tr><td><strong>${escapeHtml(r1.diagnosis)}</strong></td><td>${r1.n}</td><td>${r1.mean != null ? r1.mean : '-'}</td><td>${r1.sd != null ? r1.sd : '-'}</td><td rowspan="2">${data.cohens_d != null ? data.cohens_d : '-'}</td><td rowspan="2">${data.effect_size || '-'}</td></tr>
-            <tr><td><strong>${escapeHtml(r2.diagnosis)}</strong></td><td>${r2.n}</td><td>${r2.mean != null ? r2.mean : '-'}</td><td>${r2.sd != null ? r2.sd : '-'}</td></tr>
+            <tr>
+              <td><strong>${escapeHtml(r1.diagnosis)}</strong></td>
+              <td>${r1.n}</td>
+              <td>${r1.mean != null ? r1.mean : '-'}</td>
+              <td>${r1.sd != null ? r1.sd : '-'}</td>
+              <td>${data.welch_t != null ? data.welch_t : '-'}</td>
+              <td>${data.welch_df != null ? data.welch_df : '-'}</td>
+              <td>${data.welch_p != null ? data.welch_p : '-'}</td>
+              <td>${data.mean_diff_ci95 ? `[${data.mean_diff_ci95[0]}, ${data.mean_diff_ci95[1]}]` : '-'}</td>
+              <td>${data.significant ? '<span style="color:#B3452F;font-weight:700;">p&lt;0.05</span>' : '<span style="color:#2F7A4D;">ns</span>'}</td>
+            </tr>
+            <tr>
+              <td><strong>${escapeHtml(r2.diagnosis)}</strong></td>
+              <td>${r2.n}</td>
+              <td>${r2.mean != null ? r2.mean : '-'}</td>
+              <td>${r2.sd != null ? r2.sd : '-'}</td>
+              <td colspan="5" style="text-align:center;">Mean difference (${escapeHtml(r1.diagnosis)} − ${escapeHtml(r2.diagnosis)}): ${data.welch_t != null ? ((r1.mean != null && r2.mean != null) ? (r1.mean - r2.mean).toFixed(2) : '-') : '-'}</td>
+            </tr>
           </tbody>
         </table>
-        ${r1.n < 5 || r2.n < 5 ? '<p style="color:#B3452F; font-size:.8rem; margin-top:8px;">Warning: small sample size (n &lt; 5) - results may not be reliable.</p>' : ''}
+        ${data.welch_p != null && data.welch_p < 0.001 ? '<p style="color:#B3452F;font-size:.8rem;margin-top:8px;">Highly significant difference between groups.</p>' : ''}
+        ${r1.n < 5 || r2.n < 5 ? '<p style="color:#B3452F;font-size:.8rem;margin-top:8px;">Warning: small sample size (n &lt; 5) - results may not be reliable.</p>' : ''}
       `;
     } catch (e) {
       resultsEl.innerHTML = '<p class="empty-state">Comparison failed. Check that both populations have analyzed sessions.</p>';
@@ -625,5 +741,9 @@ document.addEventListener('DOMContentLoaded', () => {
   setupFilters();
   setupCompare();
   setupExport();
+  const longMetric = $('longitudinal-metric');
+  const longRefresh = $('longitudinal-refresh-btn');
+  if (longMetric) longMetric.addEventListener('change', loadProgression);
+  if (longRefresh) longRefresh.addEventListener('click', loadProgression);
   loadDashboard();
 });

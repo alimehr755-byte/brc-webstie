@@ -193,6 +193,51 @@ db.exec(`
   )
 `);
 
+// ---- RESEARCH NORMATIVE REFERENCE BANDS ----
+// Age/sex-stratified normative joint-angle bands used by the Research Portal
+// waveform charts instead of hardcoded constants. Populated by
+// scripts/seed_normative_bands.js. Units: degrees.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS research_normative_bands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    joint TEXT NOT NULL,
+    plane TEXT NOT NULL,
+    side TEXT NOT NULL,
+    age_min INTEGER NOT NULL DEFAULT 0,
+    age_max INTEGER NOT NULL DEFAULT 999,
+    sex TEXT NOT NULL DEFAULT 'all',
+    metric TEXT NOT NULL,
+    p5 REAL,
+    p50 REAL,
+    p95 REAL,
+    source TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(joint, plane, side, age_min, age_max, sex, metric)
+  )
+`);
+
+// Seed illustrative normative bands (idempotent). Replace with clinic-specific data.
+const normativeSeed = [
+  ['knee','sagittal','L',0,999,'all','knee_flex',30,60,90,'representative'],
+  ['knee','sagittal','R',0,999,'all','knee_flex',30,60,90,'representative'],
+  ['knee','frontal','L',0,999,'all','knee_valgus',-5,0,10,'representative'],
+  ['knee','frontal','R',0,999,'all','knee_valgus',-5,0,10,'representative'],
+  ['hip','sagittal','L',0,999,'all','hip_flex',-10,30,50,'representative'],
+  ['hip','sagittal','R',0,999,'all','hip_flex',-10,30,50,'representative'],
+  ['hip','frontal','L',0,999,'all','hip_ab_abd',-10,0,15,'representative'],
+  ['hip','frontal','R',0,999,'all','hip_ab_abd',-10,0,15,'representative'],
+  ['ankle','sagittal','L',0,999,'all','ankle_angle',-20,0,30,'representative'],
+  ['ankle','sagittal','R',0,999,'all','ankle_angle',-20,0,30,'representative'],
+  ['pelvis','sagittal','L',0,999,'all','pelvic_obliquity_mean',-5,0,10,'representative'],
+  ['pelvis','frontal','L',0,999,'all','pelvic_obliquity_mean',-5,0,10,'representative'],
+  ['spine','sagittal','L',0,999,'all','lateral_trunk_lean_max',-10,0,15,'representative'],
+];
+const normativeInsert = db.prepare(
+  `INSERT OR IGNORE INTO research_normative_bands (joint, plane, side, age_min, age_max, sex, metric, p5, p50, p95, source)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+);
+for (const row of normativeSeed) normativeInsert.run(...row);
+
 // 3e.txt — combined dual-plane upload mode. Add the columns for pre-existing
 // databases created before this feature shipped. Each ALTER is guarded in its
 // own try/catch: SQLite throws when a column already exists, which we
