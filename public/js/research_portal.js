@@ -26,7 +26,33 @@ const METRIC_LABELS = {
   shoulder_drop_max: 'Shoulder Drop Max (deg)'
 };
 
-const ALL_METRICS = Object.keys(METRIC_LABELS);
+const NORMATIVE_WAVEFORM_BANDS = {
+  knee: {
+    sagittal: { L: [0, 60], R: [0, 60] },
+    frontal: { L: [0, 10], R: [0, 10] },
+    transverse: null
+  },
+  hip: {
+    sagittal: { L: [-10, 40], R: [-10, 40] },
+    frontal: { L: [-5, 10], R: [-5, 10] },
+    transverse: null
+  },
+  ankle: {
+    sagittal: { L: [-10, 20], R: [-10, 20] },
+    frontal: null,
+    transverse: null
+  }
+};
+
+function normativeBand(joint, plane, side) {
+  const j = NORMATIVE_WAVEFORM_BANDS[joint];
+  if (!j) return null;
+  const p = j[plane];
+  if (!p) return null;
+  return p[side] || (side === 'B' ? p.L : null);
+}
+
+const ALL_METRICS = ALL_METRICSS;
 const GMFCS_LEVELS = ['I','II','III','IV','V'];
 
 let totalSystemPopulation = 0;
@@ -53,7 +79,7 @@ function getFilters() {
   };
 }
 
-function dataQuery() {
+function dataQuery(extra) {
   const f = getFilters();
   const params = new URLSearchParams();
   if (f.sex && f.sex !== 'all') params.set('gender', f.sex);
@@ -61,6 +87,12 @@ function dataQuery() {
   if (f.pathology) params.set('population', f.pathology);
   if (f.ageMin) params.set('age_min', f.ageMin);
   if (f.ageMax) params.set('age_max', f.ageMax);
+  if (extra) {
+    Object.keys(extra).forEach(k => {
+      const v = extra[k];
+      if (v != null && v !== '') params.set(k, v);
+    });
+  }
   return params.toString();
 }
 
@@ -233,6 +265,7 @@ function renderMultiplane() {
 function renderWaveformChart() {
   const canvas = $('waveform-chart');
   const note = $('waveform-note');
+  const showNorm = $('show-normative') && $('show-normative').checked;
   if (!canvas) return;
   if (waveformChart) waveformChart.destroy();
   const w = currentWaveform;
@@ -242,26 +275,83 @@ function renderWaveformChart() {
     return;
   }
   canvas.style.display = 'block';
-  if (note) note.textContent = 'Mean gait-cycle curves (0–100% samples) by population for ' + w.plane + ' / ' + w.joint + ' / side ' + w.side + '.';
+  if (note) note.textContent = 'Mean gait-cycle curves (0–100% samples) by population for ' + w.plane + ' / ' + w.joint + ' / side ' + w.side + '. Shaded bands show mean ± SD.';
   const labels = Array.from({ length: w.samples || 120 }, (_, i) => Math.round((i / Math.max(1, (w.samples || 120) - 1)) * 100));
   const colors = ['#1E3C82', '#46B4DC', '#2F7A4D', '#C99436', '#B3452F', '#6B4C9A', '#8E44AD', '#16A085'];
-  const datasets = w.populations.slice(0, 8).map((pop, idx) => ({
-    label: pop.diagnosis || 'Unknown',
-    data: (pop.means || []).map((v, i) => (i < labels.length ? v : null)),
-    borderColor: colors[idx % colors.length],
-    backgroundColor: colors[idx % colors.length] + '22',
-    fill: false,
-    tension: 0.2,
-    pointRadius: 0,
-    borderWidth: 2
-  }));
+  const datasets = [];
+  const band = showNorm ? normativeBand(w.joint, w.plane, w.side) : null;
+  if (band) {
+    datasets.push({
+      label: '',
+      data: labels.map(() => band[1]),
+      borderWidth: 0,
+      showLine: true,
+      borderColor: 'transparent',
+      pointRadius: 0,
+      backgroundColor: '#C994361a'
+    });
+    datasets.push({
+      label: 'Normative range',
+      data: labels.map(() => band[0]),
+      borderWidth: 0,
+      showLine: true,
+      borderColor: 'transparent',
+      pointRadius: 0,
+      backgroundColor: '#C994361a',
+      fill: '-1'
+    });
+  }
+  w.populations.slice(0, 8).forEach((pop, idx) => {
+    const color = colors[idx % colors.length];
+    const means = pop.means || [];
+    const sds = pop.sds || [];
+    const upper = means.map((v, i) => v != null && sds[i] != null ? v + sds[i] : null);
+    const lower = means.map((v, i) => v != null && sds[i] != null ? v - sds[i] : null);
+    datasets.push({
+      label: pop.diagnosis || 'Unknown',
+      data: labels.map((_, i) => (i < means.length ? means[i] : null)),
+      borderColor: color,
+      backgroundColor: color + '22',
+      fill: false,
+      tension: 0.2,
+      pointRadius: 0,
+      borderWidth: 2
+    });
+    datasets.push({
+      label: (pop.diagnosis || 'Unknown') + ' — SD band',
+      data: upper,
+      borderWidth: 0,
+      showLine: true,
+      borderColor: 'transparent',
+      pointRadius: 0,
+      backgroundColor: color + '22',
+      fill: '+1'
+    });
+    datasets.push({
+      label: '',
+      data: lower,
+      borderWidth: 0,
+      showLine: true,
+      borderColor: 'transparent',
+      pointRadius: 0,
+      backgroundColor: color + '22',
+      fill: '-1'
+    });
+  });
   waveformChart = new Chart(canvas, {
     type: 'line',
     data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom' } },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            filter: (item) => item.text !== '' && !item.text.includes('SD band')
+          }
+        }
+      },
       scales: {
         x: { title: { display: true, text: 'Gait Cycle (%)' }, min: 0, max: 100 },
         y: { title: { display: true, text: 'Angle (deg)' } }
@@ -269,6 +359,8 @@ function renderWaveformChart() {
     }
   });
 }
+
+
 
 function renderMultiplaneTable() {
   const tbody = $('multiplane-table-body');
@@ -478,14 +570,33 @@ function setupCompare() {
 }
 
 function setupExport() {
-  const btn = $('research-export-btn');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
-    const pop = $('research-export-pop').value;
-    const params = new URLSearchParams(dataQuery());
-    if (pop) params.set('population', pop); else params.delete('population');
-    window.open('/api/gait/research/export?' + params.toString(), '_blank');
-  });
+  const csvBtn = $('research-export-btn');
+  if (csvBtn) {
+    csvBtn.addEventListener('click', () => {
+      const pop = $('research-export-pop').value;
+      const params = new URLSearchParams(dataQuery());
+      if (pop) params.set('population', pop); else params.delete('population');
+      window.open('/api/gait/research/export?' + params.toString(), '_blank');
+    });
+  }
+  const jsonBtn = $('research-export-json-btn');
+  if (jsonBtn) {
+    jsonBtn.addEventListener('click', () => {
+      const pop = $('research-export-pop').value;
+      const params = new URLSearchParams(dataQuery());
+      if (pop) params.set('population', pop); else params.delete('population');
+      window.open('/api/gait/research/export.json?' + params.toString(), '_blank');
+    });
+  }
+  const pdfBtn = $('research-export-pdf-btn');
+  if (pdfBtn) {
+    pdfBtn.addEventListener('click', () => {
+      const pop = $('research-export-pop').value;
+      const params = new URLSearchParams(dataQuery());
+      if (pop) params.set('population', pop); else params.delete('population');
+      window.open('/api/gait/research/export.pdf?' + params.toString(), '_blank');
+    });
+  }
 }
 
 function setupFilters() {
@@ -503,7 +614,9 @@ function setupFilters() {
     $('plane-sagittal').classList.add('active');
     loadDashboard();
   });
-  $('filter-joint').addEventListener('change', () => renderMetricChart());
+  $('filter-joint').addEventListener('change', loadDashboard);
+  const norm = $('show-normative');
+  if (norm) norm.addEventListener('change', renderWaveformChart);
   setupPlaneButtons();
 }
 

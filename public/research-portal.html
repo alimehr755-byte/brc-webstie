@@ -286,7 +286,11 @@
             <div class="rp-plane-btn" id="plane-transverse">Transverse</div>
           </div>
           <div class="rp-chart-box"><canvas id="waveform-chart"></canvas></div>
-          <p class="rp-note" id="waveform-note">Averaged gait-cycle curves (0–100%) by population. Shaded SD bands are not drawn in this demo; lines show mean curves.</p>
+          <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="show-normative" checked>
+            <label for="show-normative" style="font-size:.8rem; cursor:pointer;">Show normative reference range</label>
+          </div>
+          <p class="rp-note" id="waveform-note">Averaged gait-cycle curves (0–100%) by population. Shaded bands show mean ± SD.</p>
           <div class="rp-section" style="margin-top:16px;">
             <h4>Cross-Disability Comparison Table</h4>
             <div class="rp-table-wrap">
@@ -359,6 +363,8 @@
           </div>
           <div class="rp-actions">
             <button class="btn btn-primary" id="research-export-btn" type="button">Download CSV</button>
+            <button class="btn btn-primary" id="research-export-json-btn" type="button">Download JSON</button>
+            <button class="btn btn-ghost" id="research-export-pdf-btn" type="button">Download PDF</button>
           </div>
         </div>
       </div>

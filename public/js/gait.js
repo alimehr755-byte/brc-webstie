@@ -1758,6 +1758,19 @@ function renderReport(s) {
     `;
   }
 
+  const metaHtml = `
+    <div class="rp-section" style="margin-bottom:16px;">
+      <h4 style="margin:0 0 8px;">Session &amp; research metadata</h4>
+      <table class="admin-table" style="font-size:.86rem;">
+        <tr><th>Session</th><td>#${escapeHtml(s.id)}</td><th>Status</th><td>${escapeHtml(s.status || '-')}</td></tr>
+        <tr><th>Patient</th><td>${escapeHtml(s.child_name || '-')}</td><th>Diagnosis</th><td>${escapeHtml(s.diagnosis || 'Not specified')}</td></tr>
+        <tr><th>GMFCS</th><td>${escapeHtml(s.gmfcs_level || '-')}</td><th>Sex</th><td>${escapeHtml(s.gender || '-')}</td></tr>
+        <tr><th>Age</th><td>${s.age_years != null ? s.age_years : '-'}</td><th>Height / Mass</th><td>${s.height_cm != null ? s.height_cm + ' cm' : '-'} / ${s.body_mass_kg != null ? s.body_mass_kg + ' kg' : '-'}</td></tr>
+        <tr><th>Clinician</th><td>${escapeHtml(s.clinician_name || '-')}</td><th>Created</th><td>${escapeHtml(s.created_at || '-')}</td></tr>
+        <tr><th>Videos attached</th><td colspan="3">${[s.frontal_video, s.sagittal_video, s.combined_video, s.third_video].filter(Boolean).map(v => `<span style="font-size:.78rem; color:var(--ink-500);">${v.split('/').pop()}</span>`).join(' · ') || 'None attached'}</td></tr>
+        ${s.notes ? `<tr><th>Notes</th><td colspan="3">${escapeHtml(s.notes)}</td></tr>` : ''}
+      </table>
+    </div>`;
   const cycle = r.cycle;
   const stanceW = Math.max(2, cycle.stance_pct);
   const flagClass = f => f === 'prolonged' ? 'flag-prolonged' : f === 'accelerated' ? 'flag-accelerated' : f === 'missing' ? 'flag-missing' : 'flag-normal';
