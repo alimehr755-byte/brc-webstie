@@ -231,6 +231,12 @@ const normativeSeed = [
   ['pelvis','sagittal','L',0,999,'all','pelvic_obliquity_mean',-5,0,10,'representative'],
   ['pelvis','frontal','L',0,999,'all','pelvic_obliquity_mean',-5,0,10,'representative'],
   ['spine','sagittal','L',0,999,'all','lateral_trunk_lean_max',-10,0,15,'representative'],
+  ['hip','transverse','L',0,999,'all','hip_rot',-5,0,15,'representative'],
+  ['hip','transverse','R',0,999,'all','hip_rot',-5,0,15,'representative'],
+  ['pelvis','transverse','L',0,999,'all','pelvic_rot',-10,0,20,'representative'],
+  ['pelvis','transverse','R',0,999,'all','pelvic_rot',-10,0,20,'representative'],
+  ['trunk','transverse','L',0,999,'all','trunk_rot',-15,0,15,'representative'],
+  ['trunk','transverse','R',0,999,'all','trunk_rot',-15,0,15,'representative'],
 ];
 const normativeInsert = db.prepare(
   `INSERT OR IGNORE INTO research_normative_bands (joint, plane, side, age_min, age_max, sex, metric, p5, p50, p95, source)

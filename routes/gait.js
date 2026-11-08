@@ -1624,6 +1624,78 @@ router.get('/sessions/:id/report.pdf', requireAuth, async (req, res) => {
   doc.fontSize(7.5).fillColor('#5A5D55').text('Findings classified as structural (bony/alignment), functional (timing/muscle-driven) or rotational (transverse-plane torsion).', { width: 495 });
   } // end deformities
 
+  // ---- Transverse plane analysis ----
+  if (viewSection('deformities') || viewSection('prescriptions')) {
+    const cv3d = r.cv3d || {};
+    const ts = cv3d.timeseries && cv3d.timeseries.transverse || {};
+    const hrL = ts.hip_rot && ts.hip_rot.L || [];
+    const hrR = ts.hip_rot && ts.hip_rot.R || [];
+    const prL = ts.pelvic_rot && ts.pelvic_rot.L || [];
+    const prR = ts.pelvic_rot && ts.pelvic_rot.R || [];
+    const trL = ts.trunk_rot && ts.trunk_rot.L || [];
+    const trR = ts.trunk_rot && ts.trunk_rot.R || [];
+    const range = arr => arr.filter(v => v != null && Number.isFinite(v));
+    const rr = arr => range(arr).length ? (Math.max(...range(arr)) - Math.min(...range(arr))).toFixed(1) : '—';
+    const mm = arr => range(arr).length ? (range(arr).reduce((a,b)=>a+b,0)/range(arr).length).toFixed(1) : '—';
+
+    doc.moveDown(0.6);
+    doc.fontSize(13).fillColor('#1E3C82').text('Transverse Plane Analysis (Coronal-Transverse Correlate)');
+    doc.moveDown(0.4);
+
+    const tRows = [
+      ['Hip internal/external rotation', mm(hrL) + '°', mm(hrR) + '°', '-5 to 15', mm(hrL) != null && (mm(hrL) < -5 || mm(hrL) > 15) ? 'Abnormal' : 'Normal'],
+      ['Pelvic protraction/retraction', mm(prL) + '°', mm(prR) + '°', '-10 to 20', mm(prL) != null && (mm(prL) < -10 || mm(prL) > 20) ? 'Abnormal' : 'Normal'],
+      ['Trunk-pelvis counter-rotation', mm(trL) + '°', mm(trR) + '°', '-15 to 15', mm(trL) != null && (mm(trL) < -15 || mm(trL) > 15) ? 'Abnormal' : 'Normal']
+    ];
+    y = drawTable(doc, ['Metric', 'Left', 'Right', 'Normative', 'Status'], tRows, [170, 70, 70, 100, 85], doc.y);
+    doc.y = y;
+    doc.moveDown(0.3);
+
+    const hipRotMax = Math.max(...hrL.map(Math.abs), ...hrR.map(Math.abs), 0);
+    const deformities = [...(r.profile.transverse && r.profile.transverse.deformities || []), ...(r.profile.rotational && r.profile.rotational.deformities || [])];
+    const futureAbn = [];
+    if (hipRotMax > 15) futureAbn.push('Progressive internal/external tibial torsion and patellofemoral malalignment (6 months–2 years)');
+    if (deformities.some(d => d.name.toLowerCase().includes('torsion'))) futureAbn.push('Fixed tibial/femoral torsion with foot progression angle deviation (1–3 years)');
+    if (deformities.some(d => d.name.toLowerCase().includes('crouch') || d.name.toLowerCase().includes('stiff'))) futureAbn.push('Worsening stiff-knee / crouch gait with reduced swing clearance and fall risk (6 months–2 years)');
+    futureAbn.push('Compensatory lumbar hyperlordosis and pelvic obliquity progression (1–3 years)');
+
+    doc.fontSize(10).fillColor('#232520').text('Future abnormalities if transverse deviation is not corrected:');
+    futureAbn.forEach(fa => doc.fontSize(8.5).fillColor('#B3452F').text(`• ${fa}`, { width: 495 }));
+    doc.moveDown(0.3);
+
+    doc.fontSize(10).fillColor('#232520').text('Correction strategies:');
+    const corrections = [
+      'Hip rotational stretching: internal/external rotator mobility, prone and seated hip rotation',
+      'Pelvic rotation control: supine pelvic tilts with rotation, standing pelvic clock, L5-S1 mobilization',
+      'Trunk-pelvis dissociation: seated trunk rotation with pelvis stabilized, standing counter-rotation drills',
+      'Gait retraining: cue neutral hip rotation at heel strike, pelvic protraction/retraction symmetry over stance limb'
+    ];
+    corrections.forEach(c => doc.fontSize(8.5).fillColor('#2F7A4D').text(`• ${c}`, { width: 495 }));
+    doc.moveDown(0.3);
+
+    doc.fontSize(10).fillColor('#232520').text('Therapies:');
+    const therapies = [
+      'Therapeutic exercise: hip rotator strengthening, pelvic stabilizers, trunk rotators',
+      'Neuromuscular re-education: rotational symmetry drills, mirror feedback, verbal cueing',
+      'Gait training: overground/treadmill with transverse plane focus, step-width modification'
+    ];
+    therapies.forEach(t => doc.fontSize(8.5).fillColor('#2F7A4D').text(`• ${t}`, { width: 495 }));
+    doc.moveDown(0.3);
+
+    doc.fontSize(10).fillColor('#232520').text('Orthosis recommendations:');
+    const orthoRecs = [];
+    if (hipRotMax > 15 || deformities.some(d => d.name.toLowerCase().includes('torsion'))) {
+      orthoRecs.push('Derotation rotational control orthosis (RCO) or hip rotation control brace for significant tibial/femoral torsion');
+    }
+    if (deformities.some(d => d.name.toLowerCase().includes('crouch') || d.name.toLowerCase().includes('stiff'))) {
+      orthoRecs.push('AFO or DAFO to improve swing clearance and reduce compensatory transverse rotation');
+    }
+    orthoRecs.push('Foot orthosis with rotational posting if excessive foot progression angle contributes to transverse deviation');
+    orthoRecs.push('No rigid orthosis indicated at present; monitor quarterly for progression');
+    orthoRecs.forEach(o => doc.fontSize(8.5).fillColor('#232520').text(`• ${o}`, { width: 495 }));
+    doc.moveDown(0.4);
+  } // end transverse plane analysis
+
   // ---- ROM ----
   if (viewSection('rom')) {
     doc.moveDown(0.6);
@@ -2083,7 +2155,77 @@ router.get('/sessions/:id/report.docx', requireAuth, async (req, res) => {
   (r.profile.rotational ? r.profile.rotational.deformities || [] : []).forEach(d => children.push(new Paragraph({ text: `• ${d.name} (${d.magnitude}${d.category ? ' · ' + d.category : ''}) — ${d.description}`, bullet: { level: 0 } })));
   children.push(new Paragraph({ text: 'Findings classified as structural (bony/alignment), functional (timing/muscle-driven) or rotational (transverse-plane torsion).', color: '666666', size: 16 }));
 
-  children.push(new Paragraph({ text: 'Joint Kinematics (Range of Motion)', heading: HeadingLevel.HEADING_1 }));
+  // Transverse plane kinematics
+  const cv3d = r.cv3d || {};
+  const ts = cv3d.timeseries && cv3d.timeseries.transverse || {};
+  const hrL = ts.hip_rot && ts.hip_rot.L || [];
+  const hrR = ts.hip_rot && ts.hip_rot.R || [];
+  const prL = ts.pelvic_rot && ts.pelvic_rot.L || [];
+  const prR = ts.pelvic_rot && ts.pelvic_rot.R || [];
+  const trL = ts.trunk_rot && ts.trunk_rot.L || [];
+  const trR = ts.trunk_rot && ts.trunk_rot.R || [];
+  const range = arr => arr.filter(v => v != null && Number.isFinite(v));
+  const rr = arr => range(arr).length ? (Math.max(...range(arr)) - Math.min(...range(arr))).toFixed(1) : '—';
+  const mm = arr => range(arr).length ? (range(arr).reduce((a,b)=>a+b,0)/range(arr).length).toFixed(1) : '—';
+
+  if (hrL.length || hrR.length || prL.length || prR.length || trL.length || trR.length) {
+    children.push(new Paragraph({ text: 'Transverse Plane Kinematics', heading: HeadingLevel.HEADING_1, spacing: { before: 300 } }));
+    const tRows = [new TableRow({ children: ['Metric', 'Left (°)', 'Right (°)', 'Normative (°)', 'Status'].map(h => new TableCell({ children: [new Paragraph({ text: h, bold: true })] })) })];
+    const rows = [
+      ['Hip rotation', mm(hrL), mm(hrR), '-5 to 15'],
+      ['Pelvic protraction/retraction', mm(prL), mm(prR), '-10 to 20'],
+      ['Trunk-pelvis counter-rotation', mm(trL), mm(trR), '-15 to 15']
+    ];
+    rows.forEach(([m, l, rt, norm]) => {
+      const lStat = l !== '—' && (Number(l) < -5 || Number(l) > 15) ? 'Abnormal' : 'Normal';
+      tRows.push(new TableRow({ children: [m, l, rt, norm, lStat].map(v => new TableCell({ children: [new Paragraph(String(v))] })) }));
+    });
+    children.push(new Table({ rows: tRows, width: { size: 100, type: WidthType.PERCENTAGE } }));
+    children.push(new Paragraph({ text: 'Transverse plane: hip rotates laterally at initial contact → medially in stance → laterally in swing. Pelvis protracts/retracts around L5-S1. Trunk counter-rotates opposite the pelvis.', color: '666666', size: 16, spacing: { after: 200 } }));
+  }
+
+  // Future abnormalities if not corrected
+  const hipRotMax = Math.max(...hrL.map(Math.abs), ...hrR.map(Math.abs), 0);
+  const deformities = [...(r.profile.transverse && r.profile.transverse.deformities || []), ...(r.profile.rotational && r.profile.rotational.deformities || [])];
+  const futureAbn = [];
+  if (hipRotMax > 15) futureAbn.push('Progressive internal/external tibial torsion and patellofemoral malalignment (6 months–2 years)');
+  if (deformities.some(d => d.name.toLowerCase().includes('torsion'))) futureAbn.push('Fixed tibial/femoral torsion with foot progression angle deviation (1–3 years)');
+  if (deformities.some(d => d.name.toLowerCase().includes('crouch') || d.name.toLowerCase().includes('stiff'))) futureAbn.push('Worsening stiff-knee / crouch gait with reduced swing clearance and fall risk (6 months–2 years)');
+  futureAbn.push('Compensatory lumbar hyperlordosis and pelvic obliquity progression (1–3 years)');
+
+  children.push(new Paragraph({ text: 'Future Abnormalities if Transverse Deviation Is Not Corrected', heading: HeadingLevel.HEADING_1, spacing: { before: 300 } }));
+  futureAbn.forEach(fa => children.push(new Paragraph({ text: `• ${fa}`, bullet: { level: 0 } })));
+
+  children.push(new Paragraph({ text: 'Correction Strategies', heading: HeadingLevel.HEADING_1, spacing: { before: 200 } }));
+  const corrections = [
+    'Hip rotational stretching: internal/external rotator mobility, prone and seated hip rotation',
+    'Pelvic rotation control: supine pelvic tilts with rotation, standing pelvic clock, L5-S1 mobilization',
+    'Trunk-pelvis dissociation: seated trunk rotation with pelvis stabilized, standing counter-rotation drills',
+    'Gait retraining: cue neutral hip rotation at heel strike, pelvic protraction/retraction symmetry over stance limb'
+  ];
+  corrections.forEach(c => children.push(new Paragraph({ text: `• ${c}`, bullet: { level: 0 } })));
+
+  children.push(new Paragraph({ text: 'Therapies', heading: HeadingLevel.HEADING_1, spacing: { before: 200 } }));
+  const therapies = [
+    'Therapeutic exercise: hip rotator strengthening, pelvic stabilizers, trunk rotators',
+    'Neuromuscular re-education: rotational symmetry drills, mirror feedback, verbal cueing',
+    'Gait training: overground/treadmill with transverse plane focus, step-width modification'
+  ];
+  therapies.forEach(t => children.push(new Paragraph({ text: `• ${t}`, bullet: { level: 0 } })));
+
+  children.push(new Paragraph({ text: 'Orthosis Recommendations', heading: HeadingLevel.HEADING_1, spacing: { before: 200 } }));
+  const orthoRecs = [];
+  if (hipRotMax > 15 || deformities.some(d => d.name.toLowerCase().includes('torsion'))) {
+    orthoRecs.push('Derotation rotational control orthosis (RCO) or hip rotation control brace for significant tibial/femoral torsion');
+  }
+  if (deformities.some(d => d.name.toLowerCase().includes('crouch') || d.name.toLowerCase().includes('stiff'))) {
+    orthoRecs.push('AFO or DAFO to improve swing clearance and reduce compensatory transverse rotation');
+  }
+  orthoRecs.push('Foot orthosis with rotational posting if excessive foot progression angle contributes to transverse deviation');
+  orthoRecs.push('No rigid orthosis indicated at present; monitor quarterly for progression');
+  orthoRecs.forEach(o => children.push(new Paragraph({ text: `• ${o}`, bullet: { level: 0 } })));
+
+  // Joint Kinematics (Range of Motion)
   const romRows = [new TableRow({ children: ['Joint', 'Movement', 'Reference ROM', 'Observed'].map(h => new TableCell({ children: [new Paragraph({ text: h, bold: true })] })) })];
   r.kinematics.rom.forEach(x => romRows.push(new TableRow({ children: [x.joint, x.movement, x.normal, x.observed].map(v => new TableCell({ children: [new Paragraph(String(v))] })) })));
   children.push(new Table({ rows: romRows, width: { size: 100, type: WidthType.PERCENTAGE } }));
@@ -2610,9 +2752,11 @@ router.get('/research/waveforms', requireAuth, (req, res) => {
     const ts = cv3d.timeseries || {};
     const planeData = ts[plane] || {};
     let key = null;
-    if (joint === 'knee') key = plane === 'sagittal' ? 'knee_flex' : (plane === 'frontal' ? 'knee_valgus' : null);
-    if (joint === 'hip') key = plane === 'sagittal' ? 'hip_flex' : (plane === 'frontal' ? 'hip_ab_abd' : null);
-    if (joint === 'ankle') key = plane === 'sagittal' ? 'ankle_angle' : null;
+    if (joint === 'knee') key = plane === 'sagittal' ? 'knee_flex' : (plane === 'frontal' ? 'knee_valgus' : (plane === 'transverse' ? 'knee_rot' : null));
+    if (joint === 'hip') key = plane === 'sagittal' ? 'hip_flex' : (plane === 'frontal' ? 'hip_ab_abd' : (plane === 'transverse' ? 'hip_rot' : null));
+    if (joint === 'ankle') key = plane === 'sagittal' ? 'ankle_angle' : (plane === 'transverse' ? 'ankle_rot' : null);
+    if (joint === 'pelvis') key = plane === 'transverse' ? 'pelvic_rot' : null;
+    if (joint === 'spine' || joint === 'trunk') key = plane === 'transverse' ? 'trunk_rot' : null;
     if (!key || !planeData[key] || !planeData[key][side]) return;
     const arr = planeData[key][side];
     if (!Array.isArray(arr) || !arr.length) return;
@@ -3008,6 +3152,139 @@ router.get('/research/export.pdf', requireAuth, async (req, res) => {
 });
 
 // GET /research/progression — per-patient time series of key gait metrics
+// GET /research/transverse/anomaly — detect transverse plane abnormalities per session
+router.get('/research/transverse/anomaly', requireAuth, (req, res) => {
+  const sessionId = req.query.session_id || null;
+  if (!sessionId) return res.status(400).json({ error: 'session_id is required' });
+
+  const row = db.prepare(`SELECT s.id, s.diagnosis, s.gmfcs_level, s.age_years, s.gender, s.results FROM gait_sessions s WHERE s.id = ?`).get(sessionId);
+  if (!row) return res.status(404).json({ error: 'Session not found' });
+
+  const j = safeJson(row.results) || {};
+  const cv3d = j.cv3d || {};
+  const ts = cv3d.timeseries || {};
+  const anomalies = [];
+
+  // Helper: check a waveform against normative ±2σ bands for >5% of cycle
+  const checkBand = (key, side, band) => {
+    const planeData = ts.transverse || {};
+    const arr = planeData[key] && planeData[key][side];
+    if (!Array.isArray(arr) || !arr.length) return null;
+    const [p5, p95] = band;
+    const breaches = arr.map((v, i) => (v < p5 || v > p95) ? 1 : 0);
+    const breachPct = (breaches.reduce((a,b)=>a+b,0) / arr.length) * 100;
+    const maxDev = Math.max(...arr.map(Math.abs)) || 0;
+    return { key, side, breachPct, maxDev, exceedsThreshold: breachPct > 5 };
+  };
+
+  // Hip rotation: lateral at IC, medial in stance, lateral in swing
+  const hipL = checkBand('hip_rot', 'L', [-5, 15]);
+  const hipR = checkBand('hip_rot', 'R', [-5, 15]);
+  if (hipL && hipL.exceedsThreshold) anomalies.push({ joint: 'Hip', side: 'L', finding: 'Excessive transverse hip rotation outside normative band', severity: hipL.breachPct > 20 ? 'major' : 'moderate' });
+  if (hipR && hipR.exceedsThreshold) anomalies.push({ joint: 'Hip', side: 'R', finding: 'Excessive transverse hip rotation outside normative band', severity: hipR.breachPct > 20 ? 'major' : 'moderate' });
+
+  // Pelvic rotation asymmetry
+  const pelL = checkBand('pelvic_rot', 'L', [-10, 20]);
+  const pelR = checkBand('pelvic_rot', 'R', [-10, 20]);
+  if (pelL && pelR) {
+    const asym = Math.abs((pelL.maxDev || 0) - (pelR.maxDev || 0));
+    if (asym > 5) anomalies.push({ joint: 'Pelvis', side: 'Both', finding: `Pelvic rotation asymmetry ${asym.toFixed(1)}° exceeds 5° threshold`, severity: asym > 10 ? 'major' : 'moderate' });
+  }
+
+  // Trunk counter-rotation: trunk should oppose pelvis
+  const trunkL = checkBand('trunk_rot', 'L', [-15, 15]);
+  const trunkR = checkBand('trunk_rot', 'R', [-15, 15]);
+  if (trunkL && trunkR && pelL && pelR) {
+    const counterOk = (pelL.maxDev > 0 && trunkL.maxDev < 0) || (pelL.maxDev < 0 && trunkL.maxDev > 0);
+    if (!counterOk) anomalies.push({ joint: 'Trunk', side: 'Both', finding: 'Loss of trunk-pelvis counter-rotation (upper/lower trunk moving in same direction)', severity: 'moderate' });
+  }
+
+  const result = {
+    session_id: parseInt(sessionId),
+    diagnosis: row.diagnosis || 'Unknown',
+    gmfcs_level: row.gmfcs_level || 'Not specified',
+    age_years: row.age_years,
+    gender: row.gender,
+    anomalies,
+    anomaly_count: anomalies.length,
+    overall: anomalies.length === 0 ? 'Within normal transverse limits' : (anomalies.some(a => a.severity === 'major') ? 'Major transverse plane deviation' : 'Moderate transverse plane deviation')
+  };
+  res.json(result);
+});
+
+// GET /research/transverse/prediction — future abnormalities, correction, therapies, orthosis
+router.get('/research/transverse/prediction', requireAuth, (req, res) => {
+  const sessionId = req.query.session_id || null;
+  if (!sessionId) return res.status(400).json({ error: 'session_id is required' });
+
+  const row = db.prepare(`SELECT s.id, s.diagnosis, s.gmfcs_level, s.age_years, s.gender, s.results FROM gait_sessions s WHERE s.id = ?`).get(sessionId);
+  if (!row) return res.status(404).json({ error: 'Session not found' });
+
+  const j = safeJson(row.results) || {};
+  const cv3d = j.cv3d || {};
+  const ts = cv3d.timeseries || {};
+  const profile = j.profile || {};
+  const deformities = [...(profile.transverse && profile.transverse.deformities || []), ...(profile.rotational && profile.rotational.deformities || [])];
+
+  const transverseAnomalies = [];
+  const hipRotL = (ts.transverse && ts.transverse.hip_rot && ts.transverse.hip_rot.L) || [];
+  const hipRotR = (ts.transverse && ts.transverse.hip_rot && ts.transverse.hip_rot.R) || [];
+  const maxHipRot = Math.max(...hipRotL.map(Math.abs), ...hipRotR.map(Math.abs), 0);
+
+  // Future abnormalities if not corrected
+  const futureAbnormalities = [];
+  if (maxHipRot > 15) {
+    futureAbnormalities.push({ area: 'Hip/Knee', prediction: 'Progressive internal/external tibial torsion and patellofemoral malalignment', timeline: '6 months - 2 years', mechanism: 'Sustained transverse hip rotation drift concentrates rotational stress on the knee and ankle' });
+  }
+  if (deformities.some(d => d.name.toLowerCase().includes('torsion'))) {
+    futureAbnormalities.push({ area: 'Lower Limb', prediction: 'Fixed external/internal tibial torsion with foot progression angle deviation', timeline: '1 - 3 years', mechanism: 'Uncorrected rotational malalignment becomes structural as soft tissues adapt' });
+  }
+  if (deformities.some(d => d.name.toLowerCase().includes('crouch') || d.name.toLowerCase().includes('stiff'))) {
+    futureAbnormalities.push({ area: 'Knee', prediction: 'Worsening stiff-knee / crouch gait with reduced swing clearance', timeline: '6 months - 2 years', mechanism: 'Transverse hip restriction compounds sagittal plane stiff-knee, increasing toe-drag and fall risk' });
+  }
+  futureAbnormalities.push({ area: 'Spine/Pelvis', prediction: 'Compensatory lumbar hyperlordosis and pelvic obliquity progression', timeline: '1 - 3 years', mechanism: 'Loss of trunk-pelvis counter-rotation forces the spine to absorb rotational momentum' });
+  if (futureAbnormalities.length === 0) futureAbnormalities.push({ area: 'General', prediction: 'Likely stable if transverse rotation remains within normative band and strengthening continues', timeline: 'Ongoing', mechanism: 'No major transverse deviation detected; maintain current program' });
+
+  // Correction strategies
+  const corrections = [];
+  if (maxHipRot > 15) corrections.push('Hip rotational stretching: internal/external rotator mobility, prone hip rotation, seated hip rotation');
+  corrections.push('Pelvic rotation control: supine pelvic tilts with rotation, standing pelvic clock, L5-S1 mobilization');
+  corrections.push('Trunk-pelvis dissociation: seated trunk rotation with pelvis stabilized, standing upper/lower trunk counter-rotation drills');
+  corrections.push('Gait retraining: cue heel strike with neutral hip rotation, practice pelvic protraction/retraction symmetry over the stance limb');
+  if (deformities.length) corrections.push('Manual therapy: joint mobilization for restricted hip/pelvis rotation, soft tissue release of overactive rotators');
+
+  // Therapies
+  const therapies = [];
+  therapies.push('Therapeutic exercise: hip rotator strengthening (internal/external rotators), pelvic stabilizers, trunk rotators');
+  therapies.push('Neuromuscular re-education: rotational symmetry drills, mirror feedback, verbal cueing for transverse plane alignment');
+  therapies.push('Gait training: overground and treadmill with transverse plane focus, step-width modification, rotational weight shifting');
+  if (deformities.some(d => d.category === 'structural')) therapies.push('Serial casting or dynamic bracing if structural rotational contracture develops');
+
+  // Orthosis recommendations
+  const orthosis = [];
+  if (maxHipRot > 15 || deformities.some(d => d.name.toLowerCase().includes('torsion'))) {
+    orthosis.push('Derotation rotational control orthosis (RCO) or hip abduction/internal-external rotation control brace for significant tibial/femoral torsion');
+  }
+  if (deformities.some(d => d.name.toLowerCase().includes('crouch') || d.name.toLowerCase().includes('stiff'))) {
+    orthosis.push('AFO (ankle-foot orthosis) or DAFO to improve swing clearance and reduce compensatory transverse rotation');
+  }
+  orthosis.push('Foot orthosis with rotational posting if excessive foot progression angle contributes to transverse deviation');
+  if (!orthosis.length || orthosis.every(o => o.includes('Foot orthosis'))) orthosis.push('No rigid orthosis indicated at present; monitor quarterly for progression');
+
+  res.json({
+    session_id: parseInt(sessionId),
+    diagnosis: row.diagnosis || 'Unknown',
+    gmfcs_level: row.gmfcs_level || 'Not specified',
+    max_hip_transverse_rotation_deg: Math.round(maxHipRot * 100) / 100,
+    detected_deformities: deformities.map(d => d.name),
+    future_abnormalities: futureAbnormalities,
+    correction_strategies: corrections,
+    therapies: therapies,
+    orthosis_recommendations: orthosis,
+    generated_at: new Date().toISOString()
+  });
+});
+
 router.get('/research/progression', requireAuth, (req, res) => {
   const diagnosis = req.query.diagnosis || null;
   const gender = req.query.gender || null;

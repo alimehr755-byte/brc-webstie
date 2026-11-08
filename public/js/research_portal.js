@@ -194,6 +194,7 @@ async function loadDashboard() {
     renderCompareSelectors();
     renderExportDropdown();
     renderRomTable();
+    if (getFilters().plane === 'transverse') await loadTransverse();
   } catch (e) {
     console.error(e);
   }
@@ -617,6 +618,7 @@ function setupTabs() {
       tab.classList.add('active');
       const panel = document.querySelector('#research-tab-' + tab.dataset.tab);
       if (panel) panel.style.display = 'block';
+      if (tab.dataset.tab === 'transverse') loadTransverse();
     });
   });
   document.querySelectorAll('.gait-tab-panel').forEach((p, i) => {
@@ -633,6 +635,7 @@ function setupPlaneButtons() {
       document.querySelectorAll('.rp-plane-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       loadDashboard();
+      if (plane === 'transverse') loadTransverse();
     });
   });
 }
@@ -715,8 +718,107 @@ function setupExport() {
   }
 }
 
+async function loadTransverse() {
+  const f = getFilters();
+  if (f.plane !== 'transverse') return;
+  const params = new URLSearchParams();
+  params.set('joint', f.joint);
+  params.set('plane', f.plane);
+  params.set('side', f.side);
+  if (f.pathology) params.set('population', f.pathology);
+  if (f.sex && f.sex !== 'all') params.set('gender', f.sex);
+  if (f.gmfcs) params.set('gmfcs_level', f.gmfcs);
+  if (f.ageMin) params.set('age_min', f.ageMin);
+  if (f.ageMax) params.set('age_max', f.ageMax);
+  try {
+    const wf = await fetchJson('/api/gait/research/waveforms?' + params.toString()) || { populations: [], samples: 120, phases: [] };
+    currentWaveform = wf;
+    renderTransverseChart();
+    renderTransverseTable(wf);
+  } catch (e) { console.error(e); }
+  try {
+    const anom = await fetchJson('/api/gait/research/transverse/anomaly?session_id=13') || { anomalies: [], overall: 'No data' };
+    renderTransverseAnomalies(anom);
+  } catch (e) { console.error(e); }
+}
+
+function renderTransverseChart() {
+  const canvas = $('transverse-chart');
+  const note = $('transverse-note');
+  if (!canvas) return;
+  if (window.transverseChart) window.transverseChart.destroy();
+  const w = currentWaveform;
+  if (!w.populations || !w.populations.length) {
+    canvas.style.display = 'none';
+    if (note) note.textContent = 'No transverse waveform data for the selected filters.';
+    return;
+  }
+  canvas.style.display = 'block';
+  if (note) note.textContent = 'Mean transverse curves (0–100% gait cycle) by population. Shaded bands show mean ± SD.';
+  const showNorm = $('show-transverse-normative') && $('show-transverse-normative').checked;
+  const labels = Array.from({ length: w.samples || 120 }, (_, i) => Math.round((i / Math.max(1, (w.samples || 120) - 1)) * 100));
+  const colors = ['#1E3C82', '#46B4DC', '#2F7A4D', '#C99436', '#B3452F', '#6B4C9A', '#8E44AD', '#16A085'];
+  const datasets = [];
+  const band = showNorm ? dbNormativeBand(fJoint(), fPlane(), fSide()) : null;
+  if (band) {
+    datasets.push({ label: '', data: labels.map(() => band[1]), borderWidth: 0, showLine: true, borderColor: 'transparent', pointRadius: 0, backgroundColor: '#C994361a' });
+    datasets.push({ label: 'Normative range', data: labels.map(() => band[0]), borderWidth: 0, showLine: true, borderColor: 'transparent', pointRadius: 0, backgroundColor: '#C994361a', fill: '-1' });
+  }
+  w.populations.slice(0, 8).forEach((pop, idx) => {
+    const color = colors[idx % colors.length];
+    const means = pop.means || [];
+    const sds = pop.sds || [];
+    const upper = means.map((v,i) => v != null && sds[i] != null ? v + sds[i] : null);
+    const lower = means.map((v,i) => v != null && sds[i] != null ? v - sds[i] : null);
+    datasets.push({ label: pop.diagnosis || 'Unknown', data: labels.map((_,i) => (i < means.length ? means[i] : null)), borderColor: color, backgroundColor: color + '22', fill: false, tension: 0.2, pointRadius: 0, borderWidth: 2 });
+    datasets.push({ label: '', data: upper, borderWidth: 0, showLine: true, borderColor: 'transparent', pointRadius: 0, backgroundColor: color + '22', fill: '+1' });
+    datasets.push({ label: '', data: lower, borderWidth: 0, showLine: true, borderColor: 'transparent', pointRadius: 0, backgroundColor: color + '22', fill: '-1' });
+  });
+  window.transverseChart = new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { filter: (item) => item.text !== '' } } }, scales: { x: { title: { display: true, text: 'Gait Cycle (%)' }, min: 0, max: 100 }, y: { title: { display: true, text: 'Rotation (deg)' } } } }
+  });
+}
+
+function fJoint() { return $('filter-joint') ? $('filter-joint').value : 'knee'; }
+function fPlane() { return $('filter-plane') ? $('filter-plane').value : 'sagittal'; }
+function fSide() { return $('filter-side') ? $('filter-side').value : 'L'; }
+
+function renderTransverseTable(wf) {
+  const tbody = $('transverse-table-body');
+  const pops = (wf && wf.populations) || [];
+  if (!pops.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No transverse population data.</td></tr>';
+    return;
+  }
+  const control = pops.find(p => /healthy/.test(String(p.diagnosis || '')));
+  tbody.innerHTML = pops.map(p => {
+    const means = p.means || [];
+    const sds = p.sds || [];
+    const range = means.filter(v => v != null && Number.isFinite(v));
+    const r = range.length ? Math.max(...range) - Math.min(...range) : 0;
+    const meanVal = means.filter(v => v != null && Number.isFinite(v));
+    const m = meanVal.length ? meanVal.reduce((a,b)=>a+b,0)/meanVal.length : 0;
+    const avgSD = sds.filter(v => v != null && Number.isFinite(v));
+    const s = avgSD.length ? avgSD.reduce((a,b)=>a+b,0)/avgSD.length : 0;
+    const delta = control ? (m - (control.means.filter(v=>v!=null).length ? control.means.filter(v=>v!=null).reduce((a,b)=>a+b,0)/control.means.filter(v=>v!=null).length : 0)) : 0;
+    const status = Math.abs(delta) > 5 ? 'Abnormal' : 'Normal';
+    return `<tr><td><strong>${escapeHtml(p.diagnosis || 'Unknown')}</strong></td><td>${p.n}</td><td>${m.toFixed(2)}</td><td>${s.toFixed(2)}</td><td>${r.toFixed(2)}</td><td>${delta.toFixed(2)}</td><td><span class="${status === 'Abnormal' ? 'rp-warn' : ''}">${status}</span></td></tr>`;
+  }).join('');
+}
+
+function renderTransverseAnomalies(data) {
+  const tbody = $('transverse-anomaly-body');
+  const anoms = (data && data.anomalies) || [];
+  if (!anoms.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No transverse anomalies detected.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = anoms.map(a => `<tr><td>${data.session_id}</td><td>Patient</td><td>${escapeHtml(data.diagnosis || 'Unknown')}</td><td>${escapeHtml(a.finding)}</td><td><span class="${a.severity === 'major' ? 'rp-warn' : ''}">${a.severity}</span></td><td>${escapeHtml(data.overall)}</td></tr>`).join('');
+}
+
 function setupFilters() {
-  $('apply-filters-btn').addEventListener('click', loadDashboard);
   $('reset-filters-btn').addEventListener('click', () => {
     $('filter-joint').value = 'knee';
     $('filter-plane').value = 'sagittal';
@@ -733,6 +835,8 @@ function setupFilters() {
   $('filter-joint').addEventListener('change', loadDashboard);
   const norm = $('show-normative');
   if (norm) norm.addEventListener('change', renderWaveformChart);
+  const tnorm = $('show-transverse-normative');
+  if (tnorm) tnorm.addEventListener('change', renderTransverseChart);
   setupPlaneButtons();
 }
 

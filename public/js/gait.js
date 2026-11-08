@@ -325,7 +325,7 @@ function setupCreateBtn() {
         const data2 = await res2.json();
         if (!res2.ok) throw new Error(data2.error);
         showFormMsg(msg, `${data2.message} You can run the analysis from the list below.`, 'success');
-      } else {
+    } else if (plane === 'frontal') {
         showFormMsg(msg, 'Session created. Add a Frontal, Sagittal, and/or Combined video from the session card below, then run the analysis.', 'success');
       }
 
@@ -1929,7 +1929,7 @@ function renderReport(s) {
       parts.push(`<tr><td>Shoulder flexion SI</td><td>—</td><td>${sp.shoulder_flex_si != null ? sp.shoulder_flex_si + '%' : '—'}</td></tr>`);
       parts.push(`<tr><td>Elbow flexion SI</td><td>—</td><td>${sp.elbow_flex_si != null ? sp.elbow_flex_si + '%' : '—'}</td></tr>`);
       parts.push(`</tbody></table></div>`);
-    } else {
+    } else if (plane === 'frontal') {
       const m = b.metrics || {};
       const tib = m.tibiofemoral || {};
       const cl = m.coronal_load || {};
@@ -1954,8 +1954,45 @@ function renderReport(s) {
       parts.push(row('Ankle/foot alignment R (95th %ile)', (m.ankle_foot_align_max_R||0) + '°'));
       parts.push(row('Step width (mean)', (m.step_width_mean||0) + ' px'));
       parts.push(`</tbody></table></div>`);
-    }
-    const plots = b.plots || {};
+    } else if (plane === 'transverse') {
+      const ts = j.cv3d && j.cv3d.timeseries ? j.cv3d.timeseries.transverse : {};
+      const hrL = ts.hip_rot && ts.hip_rot.L || [];
+      const hrR = ts.hip_rot && ts.hip_rot.R || [];
+      const prL = ts.pelvic_rot && ts.pelvic_rot.L || [];
+      const prR = ts.pelvic_rot && ts.pelvic_rot.R || [];
+      const trL = ts.trunk_rot && ts.trunk_rot.L || [];
+      const trR = ts.trunk_rot && ts.trunk_rot.R || [];
+      const range = arr => arr.filter(v => v != null && Number.isFinite(v));
+      const rr = arr => range(arr).length ? (Math.max(...range(arr)) - Math.min(...range(arr))).toFixed(1) : '—';
+      const mm = arr => range(arr).length ? (range(arr).reduce((a,b)=>a+b,0)/range(arr).length).toFixed(1) : '—';
+      parts.push(`<div class="cv-plane">`);
+      parts.push(`<h5 style="text-transform:uppercase; letter-spacing:.5px; color:#1E3C82; font-size:.9rem;">Transverse plane — real tracked kinematics</h5>`);
+      parts.push(`<div class="mt-8 tags" style="flex-wrap:wrap;">`);
+      parts.push(`<span class="status-badge status-confirmed">Hip rotation L: ${mm(hrL)}° / R: ${mm(hrR)}°</span>`);
+      parts.push(`<span class="status-badge status-confirmed">Pelvic rotation L: ${mm(prL)}° / R: ${mm(prR)}°</span>`);
+      parts.push(`<span class="status-badge status-confirmed">Trunk rotation L: ${mm(trL)}° / R: ${mm(trR)}°</span>`);
+      parts.push(`<span class="status-badge">Hip ROM: L ${rr(hrL)}° / R ${rr(hrR)}°</span>`);
+      parts.push(`<span class="status-badge">Pelvic ROM: L ${rr(prL)}° / R ${rr(prR)}°</span>`);
+      parts.push(`<span class="status-badge">Trunk ROM: L ${rr(trL)}° / R ${rr(trR)}°</span>`);
+      parts.push(`</div>`);
+      parts.push(`<div class="mt-8" style="overflow-x:auto;">`);
+      parts.push(`<table class="admin-table"><thead><tr><th>Metric</th><th>Left</th><th>Right</th><th>Normative (°)</th><th>Status</th></tr></thead><tbody>`);
+      const hipNorm = ['-5 to 15','-5 to 15'];
+      const pelNorm = ['-10 to 20','-10 to 20'];
+      const trunkNorm = ['-15 to 15','-15 to 15'];
+      const hipStatL = mm(hrL) != null && (mm(hrL) < -5 || mm(hrL) > 15) ? 'Abnormal' : 'Normal';
+      const hipStatR = mm(hrR) != null && (mm(hrR) < -5 || mm(hrR) > 15) ? 'Abnormal' : 'Normal';
+      const pelStatL = mm(prL) != null && (mm(prL) < -10 || mm(prL) > 20) ? 'Abnormal' : 'Normal';
+      const pelStatR = mm(prR) != null && (mm(prR) < -10 || mm(prR) > 20) ? 'Abnormal' : 'Normal';
+      const trunkStatL = mm(trL) != null && (mm(trL) < -15 || mm(trL) > 15) ? 'Abnormal' : 'Normal';
+      const trunkStatR = mm(trR) != null && (mm(trR) < -15 || mm(trR) > 15) ? 'Abnormal' : 'Normal';
+      parts.push(`<tr><td>Hip rotation (IC stance→swing)</td><td>${mm(hrL)}°</td><td>${mm(hrR)}°</td><td>${hipNorm[0]}</td><td><span class="${hipStatL === 'Abnormal' ? 'rp-warn' : ''}">${hipStatL}</span></td></tr>`);
+      parts.push(`<tr><td>Pelvic protraction/retraction</td><td>${mm(prL)}°</td><td>${mm(prR)}°</td><td>${pelNorm[0]}</td><td><span class="${pelStatL === 'Abnormal' ? 'rp-warn' : ''}">${pelStatL}</span></td></tr>`);
+      parts.push(`<tr><td>Trunk-pelvis counter-rotation</td><td>${mm(trL)}°</td><td>${mm(trR)}°</td><td>${trunkNorm[0]}</td><td><span class="${trunkStatL === 'Abnormal' ? 'rp-warn' : ''}">${trunkStatL}</span></td></tr>`);
+      parts.push(`</tbody></table></div>`);
+      parts.push(`<p class="rp-note mt-8">Transverse plane: hip rotates laterally at initial contact → medially in stance → laterally in swing. Pelvis protracts/retracts around L5-S1. Trunk counter-rotates opposite the pelvis to balance momentum.</p>`);
+    } else {
+      const plots = b.plots || {};
     const plotThumbs = Object.keys(plots).filter(k => plots[k]).map(k => `
       <div style="border:1px solid #E1EEF8; border-radius:8px; background:#fff; padding:6px;">
         <a href="${artifactUrl(plots[k])}" target="_blank" title="${escapeHtml(k)} graph">
@@ -1967,6 +2004,7 @@ function renderReport(s) {
       </div>`).join('');
     if (plotThumbs) parts.push(`<div class="mt-8 tags" style="gap:10px; align-items:flex-start;">${plotThumbs}</div>`);
     parts.push(`</div>`);
+    }
     return parts.join('');
   };
   // ---- Interactive kinematic charts (item 6) — built client-side from `cv.*.timeseries` ----
@@ -2178,6 +2216,7 @@ function renderReport(s) {
     <div class="gait-tabs mt-8" role="tablist" aria-label="Plane views">
       <button type="button" class="gait-tab" data-gait-tab="sagittal" data-panel="tab-sagittal">Sagittal Plane View</button>
       <button type="button" class="gait-tab" data-gait-tab="frontal" data-panel="tab-frontal">Frontal Plane View</button>
+      <button type="button" class="gait-tab" data-gait-tab="transverse" data-panel="tab-transverse">Transverse Plane View</button>
       <button type="button" class="gait-tab" data-gait-tab="combined" data-panel="tab-combined">Combined / Dual View</button>
     </div>
     <div class="gait-tab-panel" id="tab-sagittal" data-default="${planeDefault === 'sagittal' ? '1' : '0'}">
@@ -2187,6 +2226,10 @@ function renderReport(s) {
     <div class="gait-tab-panel" id="tab-frontal" data-default="${planeDefault === 'frontal' ? '1' : '0'}">
       ${secVis('plane_cv') ? cvPlane('frontal') : ''}
       ${planeCharts('frontal')}
+    </div>
+    <div class="gait-tab-panel" id="tab-transverse" data-default="${planeDefault === 'transverse' ? '1' : '0'}">
+      ${secVis('plane_cv') ? cvPlane('transverse') : ''}
+      ${planeCharts('transverse')}
     </div>
     <div class="gait-tab-panel" id="tab-combined" data-default="${planeDefault === 'combined' ? '1' : '0'}">
       ${secVis('cv3d') ? cv3dHtml : ''}

@@ -244,6 +244,7 @@
       <div class="gait-tabs" id="research-tabs">
         <button class="gait-tab active" data-tab="overview">Overview</button>
         <button class="gait-tab" data-tab="multiplane">Multi-Plane Waveforms</button>
+        <button class="gait-tab" data-tab="transverse">Transverse Plane</button>
         <button class="gait-tab" data-tab="spatiotemporal">Spatiotemporal</button>
         <button class="gait-tab" data-tab="longitudinal">Longitudinal</button>
         <button class="gait-tab" data-tab="deformities">Deformity Heatmap</button>
@@ -298,6 +299,34 @@
               <table class="admin-table">
                 <thead><tr><th>Population</th><th>N</th><th>Mean (°)</th><th>SD (°)</th><th>Range (°)</th><th>vs Healthy Control Δ</th></tr></thead>
                 <tbody id="multiplane-table-body"><tr><td colspan="6" class="empty-state">Loading...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="research-tab-transverse" class="gait-tab-panel">
+        <div class="rp-section">
+          <h4>Transverse Plane Analysis</h4>
+          <p style="color:var(--ink-600); font-size:.9rem; margin-bottom:12px;">Hip internal/external rotation, pelvic protraction/retraction, and trunk-pelvis counter-rotation across the gait cycle (0–100%).</p>
+          <div class="rp-chart-box"><canvas id="transverse-chart"></canvas></div>
+          <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="show-transverse-normative" checked>
+            <label for="show-transverse-normative" style="font-size:.8rem; cursor:pointer;">Show normative reference range</label>
+          </div>
+          <p class="rp-note" id="transverse-note">Mean transverse curves by population. Shaded bands show mean ± SD. Counter-rotation index: trunk yaw vs pelvic yaw.</p>
+          <div class="rp-table-wrap">
+            <table class="admin-table">
+              <thead><tr><th>Population</th><th>N</th><th>Hip Rot Range (°)</th><th>Pelvic Rot Range (°)</th><th>Trunk Rot Range (°)</th><th>Counter-Rotation Index</th><th>Status</th></tr></thead>
+              <tbody id="transverse-table-body"><tr><td colspan="7" class="empty-state">Loading...</td></tr></tbody>
+            </table>
+          </div>
+          <div class="rp-section" style="margin-top:16px;">
+            <h4>Transverse Abnormality Detection</h4>
+            <div class="rp-table-wrap">
+              <table class="admin-table">
+                <thead><tr><th>Session</th><th>Patient</th><th>Diagnosis</th><th>Anomalies</th><th>Severity</th><th>Overall</th></tr></thead>
+                <tbody id="transverse-anomaly-body"><tr><td colspan="6" class="empty-state">Loading...</td></tr></tbody>
               </table>
             </div>
           </div>
