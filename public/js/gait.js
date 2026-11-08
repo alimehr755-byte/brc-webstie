@@ -307,7 +307,8 @@ function setupCreateBtn() {
           gender: document.getElementById('gait-gender')?.value || '',
           bodyMassKg: document.getElementById('gait-body-mass')?.value || '',
           clinicianName: document.getElementById('gait-clinician')?.value || '',
-          diagnosis: document.getElementById('gait-diagnosis')?.value || ''
+          diagnosis: document.getElementById('gait-diagnosis')?.value || '',
+          gmfcsLevel: document.getElementById('gait-gmfcs')?.value || ''
         })
       });
       const data1 = await res1.json();

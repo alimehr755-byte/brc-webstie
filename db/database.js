@@ -287,3 +287,11 @@ try {
     db.exec("ALTER TABLE gait_sessions ADD COLUMN diagnosis TEXT");
   }
 } catch (e) { /* ignore */ }
+
+// Research cohort GMFCS level per session (added for Research Portal multi-plane filters).
+try {
+  const _gaitColsGmfcs = db.prepare("PRAGMA table_info(gait_sessions)").all().map(c => c.name);
+  if (!_gaitColsGmfcs.includes("gmfcs_level")) {
+    db.exec('ALTER TABLE gait_sessions ADD COLUMN gmfcs_level TEXT');
+  }
+} catch (e) { /* ignore */ }

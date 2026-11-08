@@ -1,4 +1,4 @@
-// ---- Coronal Plane Research Portal (comprehensive dashboard) ----
+// ---- Multi-Plane Coronal Research Portal (comprehensive dashboard) ----
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = String(str == null ? '' : str);
@@ -10,6 +10,7 @@ const JOINT_METRICS = {
   hip: ['pelvic_obliquity_mean', 'pelvic_obliquity_max'],
   ankle: ['step_width_mean', 'weight_shift_max'],
   pelvis: ['pelvic_obliquity_mean', 'lateral_trunk_lean_max', 'head_lateral_tilt_max', 'shoulder_asymmetry_index'],
+  spine: ['lateral_trunk_lean_max', 'head_lateral_tilt_max', 'shoulder_asymmetry_index']
 };
 
 const METRIC_LABELS = {
@@ -22,42 +23,53 @@ const METRIC_LABELS = {
   weight_shift_max: 'Weight Shift Max',
   shoulder_asymmetry_index: 'Shoulder Asymmetry Index',
   head_lateral_tilt_max: 'Head Lateral Tilt Max (deg)',
-  shoulder_drop_max: 'Shoulder Drop Max (deg)',
+  shoulder_drop_max: 'Shoulder Drop Max (deg)'
 };
 
 const ALL_METRICS = Object.keys(METRIC_LABELS);
+const GMFCS_LEVELS = ['I','II','III','IV','V'];
 
 let totalSystemPopulation = 0;
 let currentPopulations = [];
 let currentSessions = [];
 let currentSummary = [];
+let currentWaveform = { joint: 'knee', plane: 'sagittal', side: 'L', populations: [], samples: 120, phases: [] };
 let metricChart = null;
 let cadenceChart = null;
+let waveformChart = null;
 
 function $(id) { return document.getElementById(id); }
 
 function getFilters() {
   return {
     joint: $('filter-joint').value,
+    plane: $('filter-plane').value,
+    side: $('filter-side').value,
     sex: $('filter-sex').value,
+    gmfcs: $('filter-gmfcs').value,
     pathology: $('filter-pathology').value,
     ageMin: $('filter-age-min').value,
-    ageMax: $('filter-age-max').value,
+    ageMax: $('filter-age-max').value
   };
 }
 
-function buildQuery(extra) {
+function dataQuery() {
   const f = getFilters();
   const params = new URLSearchParams();
   if (f.sex && f.sex !== 'all') params.set('gender', f.sex);
+  if (f.gmfcs) params.set('gmfcs_level', f.gmfcs);
+  if (f.pathology) params.set('population', f.pathology);
   if (f.ageMin) params.set('age_min', f.ageMin);
   if (f.ageMax) params.set('age_max', f.ageMax);
-  if (f.pathology) params.set('population', f.pathology);
-  if (extra) {
-    Object.keys(extra).forEach(k => {
-      if (extra[k] != null && extra[k] !== '') params.set(k, extra[k]);
-    });
-  }
+  return params.toString();
+}
+
+function waveformQuery() {
+  const f = getFilters();
+  const params = new URLSearchParams(dataQuery());
+  params.set('joint', f.joint);
+  params.set('plane', f.plane);
+  params.set('side', f.side);
   return params.toString();
 }
 
@@ -68,34 +80,33 @@ async function fetchJson(url) {
 }
 
 async function loadDashboard() {
-  const q = buildQuery();
+  const dq = dataQuery();
   try {
-    // Total system population (unfiltered)
     if (!totalSystemPopulation) {
       const allPop = await fetchJson('/api/gait/research/populations');
       totalSystemPopulation = allPop.total || 0;
     }
-    const nichePop = await fetchJson('/api/gait/research/populations' + (q ? '?' + q.replace(/population=[^&]*&?/, '') : ''));
-    // Remove population param for population counts (counts by diagnosis should reflect sex/age filters only)
-    const popParams = new URLSearchParams(q);
-    popParams.delete('population');
-    const popQ = popParams.toString();
-    const nichePop2 = await fetchJson('/api/gait/research/populations' + (popQ ? '?' + popQ : ''));
-    currentPopulations = nichePop2.populations || [];
-    const nicheTotal = nichePop2.total || 0;
+    const popQ = new URLSearchParams(dq);
+    popQ.delete('population');
+    const nichePop = await fetchJson('/api/gait/research/populations' + (popQ.toString() ? '?' + popQ.toString() : ''));
+    currentPopulations = nichePop.populations || [];
+    const nicheTotal = nichePop.total || 0;
 
-    const coronalQ = q;
-    const coronal = await fetchJson('/api/gait/research/coronal' + (coronalQ ? '?' + coronalQ : ''));
+    const coronal = await fetchJson('/api/gait/research/coronal' + (dq ? '?' + dq : ''));
     currentSessions = coronal.sessions || [];
     currentSummary = coronal.summary || [];
 
-    // Counters
+    const wq = waveformQuery();
+    currentWaveform = await fetchJson('/api/gait/research/waveforms' + (wq ? '?' + wq : '')) || { populations: [], samples: 120, phases: [] };
+    currentWaveform.joint = $('filter-joint').value;
+    currentWaveform.plane = $('filter-plane').value;
+    currentWaveform.side = $('filter-side').value;
+
     $('counter-total').textContent = totalSystemPopulation;
     $('counter-niche').textContent = nicheTotal;
     const f = getFilters();
-    $('counter-label').textContent = 'Filters: ' + (f.joint || 'knee') + ' joint, ' + (f.sex || 'all') + ', ' + (f.pathology || 'all populations');
+    $('counter-label').textContent = 'Filters: ' + f.plane + ' / ' + f.joint + ' / side ' + f.side + ', ' + (f.sex || 'all') + ', GMFCS ' + (f.gmfcs || 'all') + ', ' + (f.pathology || 'all populations');
 
-    // KPIs
     $('kpi-filtered').textContent = currentSessions.length;
     $('kpi-pops').textContent = currentPopulations.length;
     const cadences = currentSessions.map(s => s.cadence).filter(v => v != null && Number.isFinite(v));
@@ -106,9 +117,11 @@ async function loadDashboard() {
     $('kpi-stance').textContent = stanceMean != null ? stanceMean.toFixed(1) + '%' : '-';
 
     populatePathologyDropdown();
+    populateGMFCSDropdown();
     renderPopulationTable(nicheTotal);
     renderSessionTable();
     renderMetricChart();
+    renderMultiplane();
     renderSpatiotemporal();
     renderCadenceChart();
     renderDeformities();
@@ -118,6 +131,19 @@ async function loadDashboard() {
   } catch (e) {
     console.error(e);
   }
+}
+
+function populateGMFCSDropdown() {
+  const sel = $('filter-gmfcs');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Not specified</option>';
+  GMFCS_LEVELS.forEach(l => {
+    const opt = document.createElement('option');
+    opt.value = l;
+    opt.textContent = l;
+    sel.appendChild(opt);
+  });
+  if (current) sel.value = current;
 }
 
 function populatePathologyDropdown() {
@@ -145,13 +171,13 @@ function renderPopulationTable(nicheTotal) {
     const pct = nicheTotal > 0 ? Math.round((p.session_count / nicheTotal) * 100) : 0;
     return `<tr>
       <td><strong>${escapeHtml(p.diagnosis || 'Unknown')}</strong></td>
+      <td>-</td>
       <td>${p.session_count}</td>
       <td>${pct}%</td>
       <td>${m.pelvic_obliquity_mean && m.pelvic_obliquity_mean.mean != null ? m.pelvic_obliquity_mean.mean : '-'}</td>
-      <td>${m.lateral_trunk_lean_max && m.lateral_trunk_lean_max.mean != null ? m.lateral_trunk_lean_max.mean : '-'}</td>
       <td>${m.knee_valgus_mean && m.knee_valgus_mean.mean != null ? m.knee_valgus_mean.mean : '-'}</td>
     </tr>`;
-  }).join('') + `<tr style="font-weight:700;"><td>Total</td><td>${nicheTotal}</td><td>100%</td><td colspan="3"></td></tr>`;
+  }).join('') + `<tr style="font-weight:700;"><td>Total</td><td>-</td><td>${nicheTotal}</td><td>100%</td><td colspan="2"></td></tr>`;
 }
 
 function renderSessionTable() {
@@ -164,10 +190,10 @@ function renderSessionTable() {
     <td>${s.session_id}</td>
     <td>${escapeHtml(s.child_name || '-')}</td>
     <td>${escapeHtml(s.diagnosis || 'Unknown')}</td>
+    <td>${escapeHtml(s.gmfcs_level || '-')}</td>
     <td>${escapeHtml(s.gender || '-')}</td>
     <td>${s.age_years != null ? s.age_years : '-'}</td>
     <td>${s.cadence != null ? Number(s.cadence).toFixed(2) : '-'}</td>
-    <td>${s.stance_pct != null ? Number(s.stance_pct).toFixed(1) + '%' : '-'}</td>
   </tr>`).join('');
 }
 
@@ -185,18 +211,101 @@ function renderMetricChart() {
       const agg = s && s.metrics && s.metrics[m];
       return agg && agg.mean != null ? agg.mean : null;
     }),
-    backgroundColor: ['#1E3C82', '#46B4DC', '#2F7A4D', '#C99436', '#B3452F', '#6B4C9A'][idx % 6],
+    backgroundColor: ['#1E3C82', '#46B4DC', '#2F7A4D', '#C99436', '#B3452F', '#6B4C9A'][idx % 6]
   }));
   metricChart = new Chart(canvas, {
     type: 'bar',
+    data: { labels, datasets },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+function ensureChart(callback) {
+  if (typeof Chart !== 'undefined') return callback();
+  setTimeout(() => ensureChart(callback), 150);
+}
+
+function renderMultiplane() {
+  ensureChart(renderWaveformChart);
+  renderMultiplaneTable();
+}
+
+function renderWaveformChart() {
+  const canvas = $('waveform-chart');
+  const note = $('waveform-note');
+  if (!canvas) return;
+  if (waveformChart) waveformChart.destroy();
+  const w = currentWaveform;
+  if (!w.populations || !w.populations.length) {
+    canvas.style.display = 'none';
+    if (note) note.textContent = 'No waveform data for the selected plane/joint/side and filters.';
+    return;
+  }
+  canvas.style.display = 'block';
+  if (note) note.textContent = 'Mean gait-cycle curves (0–100% samples) by population for ' + w.plane + ' / ' + w.joint + ' / side ' + w.side + '.';
+  const labels = Array.from({ length: w.samples || 120 }, (_, i) => Math.round((i / Math.max(1, (w.samples || 120) - 1)) * 100));
+  const colors = ['#1E3C82', '#46B4DC', '#2F7A4D', '#C99436', '#B3452F', '#6B4C9A', '#8E44AD', '#16A085'];
+  const datasets = w.populations.slice(0, 8).map((pop, idx) => ({
+    label: pop.diagnosis || 'Unknown',
+    data: (pop.means || []).map((v, i) => (i < labels.length ? v : null)),
+    borderColor: colors[idx % colors.length],
+    backgroundColor: colors[idx % colors.length] + '22',
+    fill: false,
+    tension: 0.2,
+    pointRadius: 0,
+    borderWidth: 2
+  }));
+  waveformChart = new Chart(canvas, {
+    type: 'line',
     data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { position: 'bottom' } },
-      scales: { y: { beginAtZero: true } },
+      scales: {
+        x: { title: { display: true, text: 'Gait Cycle (%)' }, min: 0, max: 100 },
+        y: { title: { display: true, text: 'Angle (deg)' } }
+      }
     }
   });
+}
+
+function renderMultiplaneTable() {
+  const tbody = $('multiplane-table-body');
+  const pops = currentWaveform.populations || [];
+  if (!pops.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No cross-disability waveform data for the selected filters.</td></tr>';
+    return;
+  }
+  const control = pops.find(p => /healthy/.test(String(p.diagnosis || '')));
+  const controlMean = control ? meanOfMeans(control) : null;
+  tbody.innerHTML = pops.map(p => {
+    const m = meanOfMeans(p);
+    const range = rangeOfMeans(p);
+    const delta = controlMean != null && m != null ? (m - controlMean) : null;
+    return `<tr>
+      <td><strong>${escapeHtml(p.diagnosis || 'Unknown')}</strong></td>
+      <td>${p.n}</td>
+      <td>${m != null ? m.toFixed(2) : '-'}</td>
+      <td>${avgSD(p) != null ? avgSD(p).toFixed(2) : '-'}</td>
+      <td>${range != null ? range.toFixed(2) : '-'}</td>
+      <td>${delta != null ? delta.toFixed(2) : (control ? '-' : 'no control')}</td>
+    </tr>`;
+  }).join('');
+}
+
+function meanOfMeans(pop) {
+  const vals = (pop.means || []).filter(v => v != null && Number.isFinite(v));
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+}
+function avgSD(pop) {
+  const vals = (pop.sds || []).filter(v => v != null && Number.isFinite(v));
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+}
+function rangeOfMeans(pop) {
+  const vals = (pop.means || []).filter(v => v != null && Number.isFinite(v));
+  if (!vals.length) return null;
+  return Math.max(...vals) - Math.min(...vals);
 }
 
 function renderSpatiotemporal() {
@@ -270,12 +379,11 @@ function renderDeformities() {
   const maxTotal = Math.max(1, ...Object.values(byDx).map(v => v.total));
   let html = '<div class="rp-heat-row"><div class="rp-heat-head">Population</div><div class="rp-heat-head">Frontal</div><div class="rp-heat-head">Sagittal</div><div class="rp-heat-head">Rotational</div></div>';
   Object.entries(byDx).forEach(([dx, v]) => {
-    const intensity = v.total / maxTotal;
     html += '<div class="rp-heat-row">';
     html += `<div><strong>${escapeHtml(dx)}</strong> (n=${v.total})</div>`;
     ['frontal', 'sagittal', 'rotational'].forEach(plane => {
       const count = v[plane];
-      const alpha = Math.min(0.85, 0.15 + (count / Math.max(1, maxTotal)) * 0.7);
+      const alpha = Math.min(0.85, 0.15 + (count / maxTotal) * 0.7);
       const bg = count > 0 ? `rgba(179,69,47,${alpha})` : 'rgba(232,244,253,0.6)';
       const color = count > 0 ? '#fff' : '#1E3C82';
       html += `<div class="rp-heat-cell" style="background:${bg}; color:${color};">${count}</div>`;
@@ -303,20 +411,14 @@ function renderCompareSelectors() {
 
 function renderRomTable() {
   const tbody = $('rom-table-body');
-  let romRows = [];
-  for (const s of currentSessions) {
-    // ROM not included in coronal payload; skip (would need session detail endpoint)
-  }
   tbody.innerHTML = '<tr><td colspan="5" class="empty-state">ROM observations are available in individual gait reports.</td></tr>';
 }
 
 function renderExportDropdown() {
-  // already handled in renderCompareSelectors
+  // handled in renderCompareSelectors
 }
 
-// Tab switching
 function setupTabs() {
-  const body = document.querySelector('.dash-body');
   document.querySelectorAll('.gait-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.gait-tab').forEach(t => t.classList.remove('active'));
@@ -331,6 +433,19 @@ function setupTabs() {
   });
 }
 
+function setupPlaneButtons() {
+  ['sagittal','frontal','transverse'].forEach(plane => {
+    const btn = $('plane-' + plane);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      $('filter-plane').value = plane;
+      document.querySelectorAll('.rp-plane-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadDashboard();
+    });
+  });
+}
+
 function setupCompare() {
   const btn = $('research-compare-btn');
   if (!btn) return;
@@ -341,7 +456,7 @@ function setupCompare() {
     const resultsEl = $('research-compare-results');
     resultsEl.innerHTML = '<p class="empty-state">Comparing...</p>';
     try {
-      const q = buildQuery({ pop1, pop2, metric });
+      const q = dataQuery({ pop1, pop2, metric });
       const res = await fetch('/api/gait/research/compare?' + q);
       if (!res.ok) throw new Error('Comparison failed');
       const data = await res.json();
@@ -367,9 +482,7 @@ function setupExport() {
   if (!btn) return;
   btn.addEventListener('click', () => {
     const pop = $('research-export-pop').value;
-    const q = buildQuery({ population: pop });
-    // buildQuery includes population from filter; override with selected export pop
-    const params = new URLSearchParams(q);
+    const params = new URLSearchParams(dataQuery());
     if (pop) params.set('population', pop); else params.delete('population');
     window.open('/api/gait/research/export?' + params.toString(), '_blank');
   });
@@ -379,15 +492,19 @@ function setupFilters() {
   $('apply-filters-btn').addEventListener('click', loadDashboard);
   $('reset-filters-btn').addEventListener('click', () => {
     $('filter-joint').value = 'knee';
+    $('filter-plane').value = 'sagittal';
+    $('filter-side').value = 'L';
     $('filter-sex').value = 'all';
+    $('filter-gmfcs').value = '';
     $('filter-pathology').value = '';
     $('filter-age-min').value = '';
     $('filter-age-max').value = '';
+    document.querySelectorAll('.rp-plane-btn').forEach(b => b.classList.remove('active'));
+    $('plane-sagittal').classList.add('active');
     loadDashboard();
   });
-  $('filter-joint').addEventListener('change', () => {
-    renderMetricChart();
-  });
+  $('filter-joint').addEventListener('change', () => renderMetricChart());
+  setupPlaneButtons();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

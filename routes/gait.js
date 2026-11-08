@@ -117,7 +117,7 @@ const upload = multer({
   }
 });
 
-const SESSION_FIELDS = 'id, user_id, status, frontal_video, sagittal_video, frontal_name, sagittal_name, combined_video, combined_name, third_video, third_name, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name, diagnosis, results, analyzer_meta, review_note, reviewed_by, reviewed_at, created_at, updated_at';
+const SESSION_FIELDS = 'id, user_id, status, frontal_video, sagittal_video, frontal_name, sagittal_name, combined_video, combined_name, third_video, third_name, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name, diagnosis, gmfcs_level, results, analyzer_meta, review_note, reviewed_by, reviewed_at, created_at, updated_at';
 
 function serialize(row, includeResults = false) {
   const s = { ...row };
@@ -575,6 +575,12 @@ function normalizeDiagnosis(raw) {
   const s = String(raw).trim().slice(0, 120);
   return s || null;
 }
+function normalizeGMFCS(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim().toUpperCase();
+  const allowed = ['I','II','III','IV','V','UNSPECIFIED'];
+  return allowed.includes(s) ? s : null;
+}
 
 router.post('/sessions', requireAuth, (req, res) => {
   const notes = String(req.body.notes || '').trim().slice(0, 2000);
@@ -587,9 +593,10 @@ router.post('/sessions', requireAuth, (req, res) => {
   const bodyMassKg = normalizeBodyMass(req.body.bodyMassKg);
   const clinicianName = String(req.body.clinicianName || '').trim().slice(0, 200) || null;
   const diagnosis = normalizeDiagnosis(req.body.diagnosis);
+  const gmfcsLevel = normalizeGMFCS(req.body.gmfcsLevel);
   const result = db.prepare(
-    "INSERT INTO gait_sessions (user_id, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name, diagnosis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(req.userId, notes, hint, heightCm, ageYears, gender, bodyMassKg, clinicianName, diagnosis);
+    "INSERT INTO gait_sessions (user_id, notes, speed_hint, height_cm, age_years, gender, body_mass_kg, clinician_name, diagnosis, gmfcs_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(req.userId, notes, hint, heightCm, ageYears, gender, bodyMassKg, clinicianName, diagnosis, gmfcsLevel);
   res.status(201).json({ success: true, id: result.lastInsertRowid, message: 'Gait session created. Upload your videos.' });
 });
 
@@ -609,8 +616,9 @@ router.patch('/sessions/:id', requireAuth, (req, res) => {
   let newGender = row.gender;
   let newBodyMass = row.body_mass_kg;
   let newClinician = row.clinician_name;
+  let newGmfcs = row.gmfcs_level;
 
-  const supportedFields = ['speedHint', 'heightCm', 'ageYears', 'gender', 'bodyMassKg', 'clinicianName'];
+  const supportedFields = ['speedHint', 'heightCm', 'ageYears', 'gender', 'bodyMassKg', 'clinicianName', 'gmfcsLevel'];
 
   if ('speedHint' in req.body) {
     const speedHint = String(req.body.speedHint || '').trim().toLowerCase();
@@ -659,6 +667,13 @@ router.patch('/sessions/:id', requireAuth, (req, res) => {
     sets.push('gender = ?');
     values.push(g);
     newGender = g;
+  }
+
+  if ('gmfcsLevel' in req.body) {
+    const g = normalizeGMFCS(req.body.gmfcsLevel);
+    sets.push('gmfcs_level = ?');
+    values.push(g);
+    newGmfcs = g;
   }
 
   if ('bodyMassKg' in req.body) {
@@ -2435,11 +2450,13 @@ function addFooters(doc) {
 // GET /research/populations — count of analyzed sessions by diagnosis
 router.get('/research/populations', requireAuth, (req, res) => {
   const gender = req.query.gender || null;
+  const gmfcsLevel = req.query.gmfcs_level || null;
   const ageMin = req.query.age_min ? Number(req.query.age_min) : null;
   const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
   let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL";
   const params = [];
   if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
+  if (gmfcsLevel && gmfcsLevel !== 'unspecified') { where += " AND s.gmfcs_level = ?"; params.push(gmfcsLevel); }
   if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
   if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
   const rows = db.prepare(`
@@ -2459,6 +2476,7 @@ router.get('/research/populations', requireAuth, (req, res) => {
 router.get('/research/coronal', requireAuth, (req, res) => {
   const population = req.query.population || null;
   const gender = req.query.gender || null;
+  const gmfcsLevel = req.query.gmfcs_level || null;
   const ageMin = req.query.age_min ? Number(req.query.age_min) : null;
   const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
 
@@ -2466,11 +2484,12 @@ router.get('/research/coronal', requireAuth, (req, res) => {
   const params = [];
   if (population) { where += "       AND COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) = ?"; params.push(population); }
   if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
+  if (gmfcsLevel && gmfcsLevel !== 'unspecified') { where += " AND s.gmfcs_level = ?"; params.push(gmfcsLevel); }
   if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
   if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
 
   const rows = db.prepare(`
-    SELECT s.id, s.user_id, s.created_at, COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, u.child_name, s.age_years, s.gender, s.results
+    SELECT s.id, s.user_id, s.created_at, COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, u.child_name, s.age_years, s.gender, s.gmfcs_level, s.results
     FROM gait_sessions s
     JOIN users u ON u.id = s.user_id
     ${where}
@@ -2490,6 +2509,7 @@ router.get('/research/coronal', requireAuth, (req, res) => {
       session_id: r.id,
       user_id: r.user_id,
       diagnosis: r.diagnosis,
+      gmfcs_level: r.gmfcs_level,
       child_name: r.child_name,
       age_years: r.age_years,
       gender: r.gender,
@@ -2551,6 +2571,91 @@ router.get('/research/coronal', requireAuth, (req, res) => {
 });
 
 // GET /research/compare — compare coronal metrics between two populations
+// GET /research/waveforms – aggregated multi-plane gait-cycle waveforms by population
+router.get('/research/waveforms', requireAuth, (req, res) => {
+  const joint = req.query.joint || 'knee';
+  const plane = req.query.plane || 'sagittal';
+  const side = req.query.side || 'L';
+  const population = req.query.population || null;
+  const gender = req.query.gender || null;
+  const gmfcsLevel = req.query.gmfcs_level || null;
+  const ageMin = req.query.age_min ? Number(req.query.age_min) : null;
+  const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
+
+  let where = "WHERE s.status IN ('analyzed', 'reviewed') AND s.results IS NOT NULL";
+  const params = [];
+  if (population) { where += " AND COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) = ?"; params.push(population); }
+  if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
+  if (gmfcsLevel && gmfcsLevel !== 'unspecified') { where += " AND s.gmfcs_level = ?"; params.push(gmfcsLevel); }
+  if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
+  if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
+
+  const rows = db.prepare(`
+    SELECT s.id, COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, s.results
+    FROM gait_sessions s
+    JOIN users u ON u.id = s.user_id
+    ${where}
+    ORDER BY s.created_at ASC
+  `).all(...params);
+
+  const seriesByDx = {};
+  let maxLen = 120;
+  rows.forEach(r => {
+    const j = safeJson(r.results) || {};
+    const cv3d = j.cv3d || {};
+    const ts = cv3d.timeseries || {};
+    const planeData = ts[plane] || {};
+    let key = null;
+    if (joint === 'knee') key = plane === 'sagittal' ? 'knee_flex' : (plane === 'frontal' ? 'knee_valgus' : null);
+    if (joint === 'hip') key = plane === 'sagittal' ? 'hip_flex' : (plane === 'frontal' ? 'hip_ab_abd' : null);
+    if (joint === 'ankle') key = plane === 'sagittal' ? 'ankle_angle' : null;
+    if (!key || !planeData[key] || !planeData[key][side]) return;
+    const arr = planeData[key][side];
+    if (!Array.isArray(arr) || !arr.length) return;
+    maxLen = Math.min(maxLen, arr.length);
+    const dx = r.diagnosis || 'Unknown';
+    if (!seriesByDx[dx]) seriesByDx[dx] = [];
+    seriesByDx[dx].push(arr.slice(0, maxLen));
+  });
+
+  const phases = [];
+  try {
+    const first = rows[0];
+    if (first) {
+      const cycle = (safeJson(first.results) || {}).cycle || {};
+      const totalDuration = cycle.phases ? cycle.phases.reduce((t, ph) => t + (Number(ph.duration_ms) || 0), 0) : 0;
+      if (Array.isArray(cycle.phases)) {
+        let cum = 0;
+        cycle.phases.forEach(ph => {
+          const dur = Number(ph.duration_ms) || 0;
+          const start = totalDuration ? Math.round((cum / totalDuration) * 100) : 0;
+          cum += dur;
+          const end = totalDuration ? Math.round((cum / totalDuration) * 100) : 100;
+          phases.push({ code: ph.code, name: ph.name, start_pct: start, end_pct: Math.min(100, Math.max(0, end)) });
+        });
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  const result = [];
+  Object.entries(seriesByDx).forEach(([dx, arrs]) => {
+    const n = arrs.length;
+    const means = [];
+    const sds = [];
+    for (let i = 0; i < maxLen; i++) {
+      const vals = arrs.map(a => a[i]).filter(v => v != null && Number.isFinite(v));
+      if (!vals.length) { means.push(null); sds.push(null); continue; }
+      const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+      const sd = Math.sqrt(vals.reduce((a,b)=>(a+(b-mean)**2),0)/vals.length);
+      means.push(Math.round(mean*100)/100);
+      sds.push(Math.round(sd*100)/100);
+    }
+    result.push({ diagnosis: dx, n, samples: maxLen, means, sds });
+  });
+
+  res.json({ joint, plane, side, samples: maxLen, phases, populations: result });
+});
+
 router.get('/research/compare', requireAuth, (req, res) => {
   const pop1 = req.query.pop1 || null;
   const pop2 = req.query.pop2 || null;
@@ -2613,6 +2718,7 @@ router.get('/research/compare', requireAuth, (req, res) => {
 router.get('/research/export', requireAuth, (req, res) => {
   const population = req.query.population || null;
   const gender = req.query.gender || null;
+  const gmfcsLevel = req.query.gmfcs_level || null;
   const ageMin = req.query.age_min ? Number(req.query.age_min) : null;
   const ageMax = req.query.age_max ? Number(req.query.age_max) : null;
 
@@ -2620,25 +2726,26 @@ router.get('/research/export', requireAuth, (req, res) => {
   const params = [];
   if (population) { where += "       AND COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) = ?"; params.push(population); }
   if (gender && gender !== 'all') { where += " AND s.gender = ?"; params.push(gender); }
+  if (gmfcsLevel && gmfcsLevel !== 'unspecified') { where += " AND s.gmfcs_level = ?"; params.push(gmfcsLevel); }
   if (ageMin != null && Number.isFinite(ageMin)) { where += " AND s.age_years >= ?"; params.push(ageMin); }
   if (ageMax != null && Number.isFinite(ageMax)) { where += " AND s.age_years <= ?"; params.push(ageMax); }
 
   const rows = db.prepare(`
-    SELECT s.id, s.user_id, s.created_at, COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, u.child_name, s.age_years, s.gender, s.results
+    SELECT s.id, s.user_id, s.created_at, COALESCE(NULLIF(s.diagnosis, ''), u.diagnosis) AS diagnosis, u.child_name, s.age_years, s.gender, s.gmfcs_level, s.results
     FROM gait_sessions s
     JOIN users u ON u.id = s.user_id
     ${where}
     ORDER BY s.created_at ASC
   `).all(...params);
 
-  const csvLines = ['session_id,patient_id,diagnosis,age_years,gender,created_at,pelvic_obliquity_mean,lateral_trunk_lean_max,knee_valgus_mean,step_width_mean,weight_shift_max,shoulder_asymmetry_index,cp_pattern_L,cp_pattern_R'];
+  const csvLines = ['session_id,patient_id,diagnosis,gmfcs_level,age_years,gender,created_at,pelvic_obliquity_mean,lateral_trunk_lean_max,knee_valgus_mean,step_width_mean,weight_shift_max,shoulder_asymmetry_index,cp_pattern_L,cp_pattern_R'];
   rows.forEach(r => {
     const res = safeJson(r.results) || {};
     const metrics = (res.cv && res.cv.frontal && res.cv.frontal.metrics) || {};
     const cp = res.cp_knee || {};
     const sides = cp.sides || {};
     csvLines.push([
-      r.id, r.user_id, r.diagnosis || '', r.age_years || '', r.gender || '', r.created_at,
+      r.id, r.user_id, r.diagnosis || '', r.gmfcs_level || '', r.age_years || '', r.gender || '', r.created_at,
       metrics.pelvic_obliquity_mean, metrics.lateral_trunk_lean_max, metrics.knee_valgus_mean,
       metrics.step_width_mean, metrics.weight_shift_max, metrics.shoulder_asymmetry_index,
       sides.L ? sides.L.pattern : '', sides.R ? sides.R.pattern : '',
