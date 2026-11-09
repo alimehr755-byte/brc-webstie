@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 # smplx_fit.py — SMPL-X body-model fitting spike (j.txt)
 #
-# Plug-in point (documented here; NOT wired into gait_lab.py report logic so the
-# existing pipeline is untouched): call fit_frame() right after MediaPipe
-# landmark extraction and before angle smoothing / gait-cycle code, passing the
-# per-frame MediaPipe 33 keypoints. Writes corrected 3D joint angles and one
-# .obj mesh per fitted frame into <out_dir>/smplx/.
+# Plug-in point: call fit_frame() right after MediaPipe landmark extraction
+# and before angle smoothing / gait-cycle code, passing per-frame MediaPipe
+# 33 keypoints. Writes corrected 3D joint angles and one .obj mesh per fitted
+# frame into <out_dir>/smplx/.
 #
 # SMPL-X model files are NOT bundled (license-gated download from
 # smpl-x.is.tue.mpg.de). When they are absent the module reports
@@ -80,16 +79,40 @@ OPENPOSE_25_TO_MP = [
     (None, None),              # 24 unused / background
 ]
 
-# SMPL-X vertex ids for anatomical angle computation (smplx.vertex_ids).
-VERTEX_IDS = {
-    "left_hip": "LEFT_HIP", "right_hip": "RIGHT_HIP",
-    "left_knee": "LEFT_KNEE", "right_knee": "RIGHT_KNEE",
-    "left_ankle": "LEFT_ANKLE", "right_ankle": "RIGHT_ANKLE",
-    "left_shoulder": "LEFT_SHOULDER", "right_shoulder": "RIGHT_SHOULDER",
+# SMPL-X body joint indices (22 body joints in SMPL order):
+# 0 pelvis, 1 left_hip, 2 right_hip, 3 spine1, 4 left_knee, 5 right_knee,
+# 6 spine2, 7 left_ankle, 8 right_ankle, 9 spine3, 10 left_foot,
+# 11 right_foot, 12 neck, 13 left_collar, 14 right_collar, 15 head,
+# 16 left_shoulder, 17 right_shoulder, 18 left_elbow, 19 right_elbow,
+# 20 left_wrist, 21 right_wrist
+SMPLX_JOINTS = {
+    "pelvis": 0,
+    "left_hip": 1,
+    "right_hip": 2,
+    "spine1": 3,
+    "left_knee": 4,
+    "right_knee": 5,
+    "spine2": 6,
+    "left_ankle": 7,
+    "right_ankle": 8,
+    "spine3": 9,
+    "left_foot": 10,
+    "right_foot": 11,
+    "neck": 12,
+    "left_collar": 13,
+    "right_collar": 14,
+    "head": 15,
+    "left_shoulder": 16,
+    "right_shoulder": 17,
+    "left_elbow": 18,
+    "right_elbow": 19,
+    "left_wrist": 20,
+    "right_wrist": 21,
 }
 
 
 def _angle_abc(a, b, c):
+    """Angle at vertex b formed by points a-b-c, in degrees."""
     ab = a - b
     cb = c - b
     denom = float(np.linalg.norm(ab) * np.linalg.norm(cb))
@@ -114,15 +137,19 @@ def _load_model(model_dir, gender):
         return None, ("SMPL-X model file not found in model_dir='%s'. Download "
                       "gender-specific SMPL-X .npz from smpl-x.is.tue.mpg.de "
                       "(license acceptance required) and place them under "
-                      "<repo>/python/smplx_models/.") % model_dir
+                      "<repo>/gait lab/models/smplx/.") % model_dir
     try:
+        # smplx.create expects model_path to be the parent directory
+        # containing a smplx/ subfolder with the .npz files
+        model_parent = os.path.dirname(model_dir)
         model = smplx.create(
-            model_dir, model_type="smplx", gender=gender, ext="npz",
+            model_parent, model_type="smplx", gender=gender, ext="npz",
             use_pca=False, flat_hand_mean=True,
         ).eval()
     except TypeError:
+        model_parent = os.path.dirname(model_dir)
         model = smplx.create(
-            model_dir, model_type="smplx", gender=gender,
+            model_parent, model_type="smplx", gender=gender,
             model_ext="npz", use_pca=False, flat_hand_mean=True,
         ).eval()
     return model, None
@@ -140,7 +167,7 @@ def _to_openpose25(keypoints):
         mp = np.asarray([[float(k.get("x", 0.0)), float(k.get("y", 0.0))]
                          for k in keypoints], dtype=np.float64)
         vis = np.asarray([float(k.get("visibility",
-                                         k.get("presence", 1.0))) for k in keypoints],
+                                     k.get("presence", 1.0))) for k in keypoints],
                          dtype=np.float64)
         pts = np.zeros((25, 2), dtype=np.float64)
         conf = np.zeros(25, dtype=np.float64)
@@ -174,14 +201,6 @@ class SmplxFitter:
         self.device = torch.device(device)
         self.model, self.model_error = _load_model(model_dir, gender)
         self.ready = self.model is not None
-        self.vertex_ids = None
-        if self.ready:
-            try:
-                from smplx import vertex_ids as _vid
-                self.vertex_ids = {name: getattr(_vid, VERTEX_IDS[name])
-                                   for name in VERTEX_IDS}
-            except Exception:
-                self.vertex_ids = None
 
     def fit(self, keypoints, out_dir, frame_idx=0):
         if not self.ready:
@@ -211,8 +230,6 @@ class SmplxFitter:
 
         pts_t = torch.tensor(pts25, device=self.device, dtype=torch.float32)
         conf_t = torch.tensor(conf, device=self.device, dtype=torch.float32)
-        # OpenPose-25 -> SMPL-X joint regressor mapping (joint name -> vertex id).
-        # Use the SMPL-X joint output directly when available.
         optimizer = torch.optim.LBFGS(
             [global_orient, body_pose, betas, cam_scale, cam_trans],
             max_iter=self.max_iters, line_search_fn="strong_wolfe")
@@ -224,8 +241,7 @@ class SmplxFitter:
                                                            device=self.device),
                            return_verts=True)
             joints = output.joints  # (1, J, 3) SMPL-X joint order
-            # Use the subset of SMPL-X joints aligned to OpenPose-25 order where
-            # the model exposes them; fall back to vertex-derived angles below.
+            # Use SMPL-X joints aligned to OpenPose-25 order.
             pred25 = joints[0, :25, :2] if joints.shape[1] >= 25 else None
             if pred25 is None:
                 pred25 = output.vertices[0, :, :2]
@@ -247,15 +263,14 @@ class SmplxFitter:
                            transl=torch.zeros(1, 3, device=self.device),
                            return_verts=True)
             verts = output.vertices[0].detach().cpu().numpy()
+            joints = output.joints[0].detach().cpu().numpy()  # (J, 3) in metres
             faces = model.faces if hasattr(model, "faces") else None
             if faces is None and hasattr(model, "faces_tensor"):
                 faces = model.faces_tensor.detach().cpu().numpy()
 
-        angles = self._angles_from_verts(verts)
+        angles = self._angles_from_joints(joints)
         obj_path = None
         if out_dir:
-            # Write obj directly into the artifacts root so the Node artifact
-            # route (GET /api/gait/sessions/:id/artifacts/:file) can serve it.
             os.makedirs(out_dir, exist_ok=True)
             obj_path = os.path.join(out_dir, "smplx_frame_%04d.obj" % frame_idx)
             self._write_obj(obj_path, verts, faces)
@@ -266,26 +281,53 @@ class SmplxFitter:
             "frame": frame_idx,
             "angles_deg": angles,
             "vertices": verts.tolist(),
+            "joints": joints.tolist(),
             "obj_path": obj_path,
             "camera_scale": float(cam_scale.detach().cpu().numpy()),
             "camera_trans": cam_trans.detach().cpu().numpy().tolist(),
             "model_file_used": getattr(self, "_model_path", self.model_dir),
         }
 
-    def _angles_from_verts(self, verts):
+    def _angles_from_joints(self, joints):
+        """Compute coronal-plane angles from SMPL-X 3D joint positions.
+
+        SMPL-X joint order (22 body joints):
+          0 pelvis, 1 left_hip, 2 right_hip, 3 spine1, 4 left_knee, 5 right_knee,
+          6 spine2, 7 left_ankle, 8 right_ankle, 9 spine3, 10 left_foot,
+          11 right_foot, 12 neck, 13 left_collar, 14 right_collar, 15 head,
+          16 left_shoulder, 17 right_shoulder, 18 left_elbow, 19 right_elbow,
+          20 left_wrist, 21 right_wrist
+        """
         angles = {}
-        if self.vertex_ids is None or verts.shape[0] == 0:
+        if joints is None or joints.shape[0] < 22:
             return angles
-        vid = self.vertex_ids
-        for side, (hip, knee, ankle) in (("L", ("left_hip", "left_knee", "left_ankle")),
-                                          ("R", ("right_hip", "right_knee", "right_ankle"))):
-            if hip in vid and knee in vid and ankle in vid:
-                h = verts[vid[hip]]; k = verts[vid[knee]]; a = verts[vid[ankle]]
-                ang = _angle_abc(h, k, a)
-                if ang is not None:
-                    angles["knee_flexion_%s" % side] = round(ang, 1)
-            if hip in vid and knee in vid:
-                pass
+
+        j = joints
+
+        def angle(a_idx, b_idx, c_idx):
+            return _angle_abc(j[a_idx], j[b_idx], j[c_idx])
+
+        # Knee flexion: angle at knee between thigh (hip->knee) and shank (knee->ankle)
+        # 180 - interior angle = flexion (0 = straight leg, higher = more flexed)
+        for side, (hip, knee, ankle) in (("L", (1, 4, 7)), ("R", (2, 5, 8))):
+            ang = angle(hip, knee, ankle)
+            if ang is not None:
+                angles["knee_flexion_%s" % side] = round(ang, 1)
+
+        # Hip flexion: angle between torso (spine3->hip) and thigh (hip->knee)
+        # spine3 (idx 9) is above the hips, so torso vector = hip -> spine3
+        for side, (hip, knee) in (("L", (1, 4)), ("R", (2, 5))):
+            ang = angle(9, hip, knee)
+            if ang is not None:
+                angles["hip_flexion_%s" % side] = round(ang, 1)
+
+        # Ankle dorsiflexion: angle between shank (ankle->knee) and foot (ankle->foot)
+        # 180 - interior angle gives dorsiflexion (0 = flat foot, higher = more dorsiflexed)
+        for side, (ankle, knee, foot) in (("L", (7, 4, 10)), ("R", (8, 5, 11))):
+            ang = angle(knee, ankle, foot)
+            if ang is not None:
+                angles["ankle_angle_%s" % side] = round(ang, 1)
+
         return angles
 
     def _write_obj(self, path, verts, faces):

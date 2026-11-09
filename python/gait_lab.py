@@ -296,11 +296,13 @@ TRACK_CACHE = {}
 
 # 2.md — SMPL-X fitting spike (python/smplx_fit.py). OFF by default: flip to
 # True only after the decision gate (SMPL-X model files procured + angle
-# agreement vs MediaPipe + runtime acceptable on CPU). When on, the third
-# (Coronal) plane's raw keypoints are fitted per frame and corrected 3D knee
-# angles are merged into result["smplx"]. Existing report logic is untouched.
-USE_SMPLX = False
-SMPLX_MODEL_DIR = "smplx_models"
+# agreement vs MediaPipe + runtime acceptable on CPU). When on, per-frame
+# SMPLify-X fitting runs on raw MediaPipe landmarks AFTER MediaPipe extraction
+# and BEFORE angle smoothing / gait-cycle code, producing corrected 3D joint
+# angles and per-frame .obj meshes. Existing report logic is untouched — the
+# fitted angles override the MediaPipe-projected angles in the same series.
+USE_SMPLX = True
+SMPLX_MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "gait lab", "models", "smplx")
 
 
 def _register_track(video_path, slot, fps, width, height, step, landmarks):
@@ -536,6 +538,41 @@ def analyze_sagittal(video_path, artifacts, session_id, step=None, start=0, spee
                 closer.close()
         except Exception:
             pass
+
+    # j.txt — SMPL-X per-frame fitting on raw MediaPipe landmarks.
+    # Runs after MediaPipe extraction, before angle smoothing / gait-cycle code.
+    smplx_fitted_frames = []
+    if USE_SMPLX and fit_frame is not None:
+        try:
+            for fr in raw_landmarks:
+                kp33 = _pts_to_mediapipe33(fr.get("pts"))
+                res = fit_frame(kp33, artifacts, model_dir=SMPLX_MODEL_DIR,
+                               gender=(args.gender or "neutral"),
+                               frame_idx=int(fr.get("abs", 0)))
+                if res.get("status") == STATUS_ASSESSED:
+                    smplx_fitted_frames.append(res)
+        except Exception:
+            smplx_fitted_frames = []
+
+    # Override series angles with SMPL-X fitted 3D values where available.
+    # This corrects MediaPipe-projected angles with parametrically-fitted 3D angles
+    # without changing any downstream report logic.
+    if smplx_fitted_frames:
+        angles_by_frame = {int(f["frame"]): f for f in smplx_fitted_frames}
+        for s in ("L", "R"):
+            for si, fr in enumerate(raw_landmarks):
+                abs_idx = int(fr.get("abs", si * step))
+                if abs_idx in angles_by_frame:
+                    ang = angles_by_frame[abs_idx].get("angles_deg", {})
+                    kf_key = "knee_flexion_%s" % s
+                    if kf_key in ang and si < len(series[s]["knee_flexion"]):
+                        series[s]["knee_flexion"][si] = float(ang[kf_key])
+                    hf_key = "hip_flexion_%s" % s
+                    if hf_key in ang and si < len(series[s]["hip_flexion"]):
+                        series[s]["hip_flexion"][si] = float(ang[hf_key])
+                    aa_key = "ankle_angle_%s" % s
+                    if aa_key in ang and si < len(series[s]["ankle_angle"]):
+                        series[s]["ankle_angle"][si] = float(ang[aa_key])
 
     nsamples = len(frame_indices)
     if nsamples == 0 or all(len(v) == 0 for m in series.values() for v in m.values()):
@@ -1247,8 +1284,40 @@ def analyze_frontal(video_path, artifacts, session_id, step=None, start=0, speed
         except Exception:
             pass
 
+    # j.txt — SMPL-X per-frame fitting on raw MediaPipe landmarks (frontal plane).
+    # Runs after MediaPipe extraction, before angle smoothing / gait-cycle code.
+    smplx_fitted_frames = []
+    if USE_SMPLX and fit_frame is not None:
+        try:
+            for fr in raw_landmarks:
+                kp33 = _pts_to_mediapipe33(fr.get("pts"))
+                res = fit_frame(kp33, artifacts, model_dir=SMPLX_MODEL_DIR,
+                               gender=(args.gender or "neutral"),
+                               frame_idx=int(fr.get("abs", 0)))
+                if res.get("status") == STATUS_ASSESSED:
+                    smplx_fitted_frames.append(res)
+        except Exception:
+            smplx_fitted_frames = []
+
+    # Override series angles with SMPL-X fitted 3D values where available.
+    if smplx_fitted_frames:
+        angles_by_frame = {int(f["frame"]): f for f in smplx_fitted_frames}
+        for s in ("L", "R"):
+            for si, fr in enumerate(raw_landmarks):
+                abs_idx = int(fr.get("abs", si * step))
+                if abs_idx in angles_by_frame:
+                    ang = angles_by_frame[abs_idx].get("angles_deg", {})
+                    kf_key = "knee_flexion_%s" % s
+                    if kf_key in ang and si < len(knee_valgus):
+                        knee_valgus[si] = float(ang[kf_key])
+                    hf_key = "hip_flexion_%s" % s
+                    if hf_key in ang and si < len(hip_abduction[s]):
+                        hip_abduction[s][si] = float(ang[hf_key])
+                    aa_key = "ankle_angle_%s" % s
+                    if aa_key in ang and si < len(ankle_foot_align[s]):
+                        ankle_foot_align[s][si] = float(ang[aa_key])
+
     # Plane-orientation check: reject a side-on clip put in the "frontal" slot so we
-    # never report frontal-plane findings that were actually computed from a sagittal view.
     fr = [f for f in frontal_ratio if np.isfinite(f)]
     if fr:
         med_ratio = float(np.median(fr))
@@ -1509,6 +1578,14 @@ import anthropometry  # noqa: E402
 # installed (see 'gait lab/SETUP_SMPLX.md'). It only refines tracks already in
 # TRACK_CACHE, so the MediaPipe stage is never re-run or weakened by it.
 import smplx_refine  # noqa: E402
+
+# j.txt — per-frame SMPLify-X fitting on raw MediaPipe landmarks (python/smplx_fit.py).
+# Imported lazily so the module loads even without torch/smplx installed.
+try:
+    from smplx_fit import fit_frame, STATUS_ASSESSED  # noqa: E402
+except Exception:
+    fit_frame = None
+    STATUS_ASSESSED = "assessed"
 
 
 # Running-adapted phase model (percent of the running gait cycle). Running has

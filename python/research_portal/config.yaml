@@ -1,0 +1,52 @@
+# Research Portal - Configuration File
+# Transverse Plane Biomechanical Module
+
+# Camera Configuration
+camera:
+  resolution_width: 1920
+  resolution_height: 1080
+  frame_rate: 240
+  shutter_speed: 1000  # microseconds
+  calibration_pattern_size: [9, 6]
+  calibration_square_size: 0.025  # meters
+
+# Gait Analysis Parameters
+gait_analysis:
+  frame_stride: 15  # Process every Nth frame
+  min_confidence: 0.5
+  smoothing_window: 5
+  gait_cycle_normalization: 101  # 0-100% gait cycle
+
+# Anomaly Detection Thresholds
+anomaly_detection:
+  normative_std_multiplier: 2.0  # +/- 2 sigma
+  min_frames_above_threshold: 5  # consecutive frames
+  knee_flexion_threshold: 15.0  # degrees
+  trunk_rotation_threshold: 15.0  # degrees
+  pelvic_obliquity_threshold: 10.0  # degrees
+
+# Population Normative Data (degrees)
+normative_data:
+  knee_flexion:
+    mean: [30, 45, 60, 70, 65, 50, 40, 30, 20, 10]  # 10% gait cycle increments
+    std: [5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+  hip_flexion:
+    mean: [0, 10, 25, 30, 25, 15, 10, 10, 5, 0]
+    std: [5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+  ankle_angle:
+    mean: [0, -5, -10, -15, -10, -5, 0, 5, 10, 5]
+    std: [5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+
+# Database Configuration
+database:
+  host: "localhost"
+  port: 5432
+  database: "gait_research"
+  username: "researcher"
+  password: "change_me"
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 5000
+  debug: false
